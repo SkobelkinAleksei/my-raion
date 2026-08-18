@@ -937,6 +937,104 @@ export default function EventDetailsModal({
         }
     };
 
+    const renderEventActionBar = (item: EventDto, barClassName: string) => {
+        const itemIdNum = Number(item.id);
+        const currentOrganizerId = Number(item.organizerId || (item as any).organizer_id || 0);
+        const isOwner = (item as any).role === 'organizer' || Number(currentOrganizerId) === Number(user?.id);
+        const windowState = reputationWindow(
+            eventMoment(item),
+            (item as any).reputationOpensAt,
+            (item as any).reputationClosesAt,
+        );
+        const isPastEvent = !!item.isPast || (item as any).status === 'past' || (item as any).is_past === true || windowState.started;
+        const currentStatus = String((item as any).user_status || item.userStatus || '').toUpperCase().trim();
+        const isJoined = currentStatus === 'JOINED';
+        const isPending = currentStatus === 'PENDING';
+        const isRePending = currentStatus === 'RE_PENDING';
+        const isRejected = currentStatus === 'REJECTED';
+        const isBanned = currentStatus === 'BANNED';
+        const isKicked = currentStatus === 'KICKED';
+        const isPrivateComputed = !!item.isPrivate || (item as any).privacy === 'approval';
+
+        return (
+            <div className={`pt-2 border-t border-[#1A1916]/10 gap-2 ${barClassName}`}>
+                {isPastEvent ? (
+                    <div className="text-center w-full text-[13px] h-11 flex items-center justify-center text-[#6B645C] bg-white border border-[#1A1916]/10 rounded-full select-none">Событие завершено</div>
+                ) : confirmCancel === itemIdNum ? (
+                    <div className="flex items-center gap-3 w-full bg-[#FFF1ED] p-2 rounded-2xl border border-[#B85C5C]/20">
+                        <div className="flex-1 text-xs text-[#B85C5C] font-bold">Отменить встречу?</div>
+                        <Button variant="secondary" size="sm" onClick={() => setConfirmCancel(null)}>Нет</Button>
+                        <button onClick={async () => { try { await api.delete(`/api/v1/social/events/${itemIdNum}`); onClose(); } catch (err) { console.error(err); } }} className="text-xs font-bold px-3 py-1.5 rounded-full bg-[#B85C5C] text-white hover:bg-[#e04428] transition">Да</button>
+                    </div>
+                ) : isOwner ? (
+                    <div className="flex gap-2 w-full pt-1">
+                        <Button variant="secondary" className="flex-1 text-xs h-11 rounded-full" onClick={() => onEditEvent(item)}><Pencil className="w-3.5 h-3.5" /> Редактировать</Button>
+                        <button onClick={() => setConfirmCancel(itemIdNum)} className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs font-bold px-3 h-11 rounded-full bg-white text-[#B85C5C] border border-[#B85C5C]/30 hover:bg-[#B85C5C] hover:text-white transition"><Trash2 className="w-3.5 h-3.5" /> Отменить</button>
+                    </div>
+                ) : isJoined ? (
+                    <StatusMenuButton
+                        className="w-full"
+                        variant="success"
+                        label="Вы идёте"
+                        buttonClassName="!h-11 !rounded-full"
+                        items={[{ label: 'Выйти из события', onClick: () => { void handleLeaveClick(itemIdNum); }, tone: 'danger' }]}
+                        desktop={<button type="button" onClick={() => { void handleLeaveClick(itemIdNum); }} className="w-full bg-white hover:bg-[#B85C5C] text-[#B85C5C] hover:text-white border border-[#B85C5C]/35 font-bold h-11 text-xs rounded-full flex items-center justify-center gap-1.5 transition duration-150"><X className="w-3.5 h-3.5" /><span>Выйти из события</span></button>}
+                    />
+                ) : isPending ? (
+                    <StatusMenuButton
+                        className="w-full"
+                        variant="amber"
+                        label="Заявка отправлена"
+                        buttonClassName="!h-11 !rounded-full"
+                        items={[{ label: 'Отменить заявку', onClick: () => { void handleLeaveClick(itemIdNum); }, tone: 'danger' }]}
+                        desktop={<button type="button" onClick={() => { void handleLeaveClick(itemIdNum); }} className="w-full flex items-center justify-center gap-2.5 p-2.5 rounded-full bg-[#EDE6F5] hover:bg-[#F6E8E6] border border-[#5C4B7A]/20 hover:border-[#B85C5C]/30 text-xs text-[#5C4B7A] hover:text-[#B85C5C] transition-all duration-200 group/modalPending font-bold h-11"><Clock className="w-4 h-4 shrink-0 group-hover/modalPending:hidden animate-pulse" /><span className="group-hover/modalPending:hidden">Заявка отправлена</span><X className="w-4 h-4 hidden group-hover/modalPending:inline" /><span className="hidden group-hover/modalPending:inline">Отменить отправленную заявку</span></button>}
+                    />
+                ) : isRePending ? (
+                    <StatusMenuButton
+                        className="w-full"
+                        variant="amber"
+                        label="Повторная заявка отправлена"
+                        buttonClassName="!h-11 !rounded-full"
+                        items={[{ label: 'Отменить повторную заявку', onClick: () => { void handleLeaveClick(itemIdNum); }, tone: 'danger' }]}
+                        desktop={
+                            <button
+                                onClick={() => { void handleLeaveClick(itemIdNum); }}
+                                className="w-full flex items-center justify-center gap-2.5 p-2.5 rounded-full bg-[#EDE6F5] hover:bg-[#F6E8E6] border border-[#5C4B7A]/30 hover:border-[#B85C5C]/30 text-xs text-[#1C1824] hover:text-[#B85C5C] transition-all duration-200 group/modalRePending font-bold h-11 cursor-pointer"
+                            >
+                                <Clock className="w-3.5 h-3.5 animate-pulse group-hover/modalRePending:hidden" />
+                                <span className="group-hover/modalRePending:hidden">Повторная заявка отправлена</span>
+                                <X className="w-4 h-4 hidden group-hover/modalRePending:inline" />
+                                <span className="hidden group-hover/modalRePending:inline">Отменить повторную заявку</span>
+                            </button>
+                        }
+                    />
+                ) : isKicked ? (
+                    <div className="w-full flex items-center justify-center gap-2.5 p-2.5 rounded-full bg-[#FFF1ED] border border-[#B85C5C]/20 text-xs text-[#B85C5C] font-bold select-none h-11">
+                        <X className="w-4 h-4 shrink-0" />
+                        <span>Вас исключили из встречи</span>
+                    </div>
+                ) : isBanned ? (
+                    <div className="w-full flex items-center justify-center gap-2.5 p-2.5 rounded-full bg-[#FFF1ED] border border-[#B85C5C]/20 text-xs text-[#B85C5C] font-bold select-none h-11">
+                        <X className="w-4 h-4 shrink-0" />
+                        <span>Вам отказано организатором</span>
+                    </div>
+                ) : isRejected ? (
+                    <button
+                        type="button"
+                        onClick={() => onApply && onApply(item)}
+                        className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
+                    >
+                        <Plus className="w-4 h-4" />
+                        <span>Подать заявку повторно</span>
+                    </button>) : isPrivateComputed ? (
+                    <button onClick={() => onApply(item)} className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-98"><Send className="w-4 h-4" /> <span>Оставить заявку</span></button>
+                ) : (
+                    <button onClick={() => onJoin(item)} className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-98"><ThumbsUp className="w-4 h-4" /> <span>Вступить в событие</span></button>
+                )}
+            </div>
+        );
+    };
+
     // Обновление статуса, если организатор отклонил заявку, пока модалка открыта
     useEffect(() => {
         const onStatusRefresh = (e: Event) => {
@@ -1055,7 +1153,7 @@ export default function EventDetailsModal({
                     )}
 
                     <div
-                        className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 md:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-5 md:space-y-6 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                        className={`flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 md:p-6 space-y-5 md:space-y-6 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden ${isCluster ? 'pb-[max(1.25rem,env(safe-area-inset-bottom))]' : 'pb-4 md:pb-[max(1.25rem,env(safe-area-inset-bottom))]'}`}
                     >
                         {eventsList.map((item) => {
                             const itemIdNum = Number(item.id);
@@ -1317,87 +1415,23 @@ export default function EventDetailsModal({
                                         </div>
                                     )}
 
-                                    <div className={`pt-2 border-t border-[#1A1916]/10 flex gap-2 ${isCluster ? '' : 'sticky bottom-0 -mx-4 px-4 pb-1 bg-[#FAF6F0] md:static md:mx-0 md:px-0 md:pb-0'}`}>
-                                        {isPastEvent ? (
-                                            <div className="text-center w-full text-[13px] h-11 flex items-center justify-center text-[#6B645C] bg-white border border-[#1A1916]/10 rounded-full select-none">Событие завершено</div>
-                                        ) : confirmCancel === itemIdNum ? (
-                                            <div className="flex items-center gap-3 w-full bg-[#FFF1ED] p-2 rounded-2xl border border-[#B85C5C]/20">
-                                                <div className="flex-1 text-xs text-[#B85C5C] font-bold">Отменить встречу?</div>
-                                                <Button variant="secondary" size="sm" onClick={() => setConfirmCancel(null)}>Нет</Button>
-                                                <button onClick={async () => { try { await api.delete(`/api/v1/social/events/${itemIdNum}`); onClose(); } catch (err) { console.error(err); } }} className="text-xs font-bold px-3 py-1.5 rounded-full bg-[#B85C5C] text-white hover:bg-[#e04428] transition">Да</button>
-                                            </div>
-                                        ) : isOwner ? (
-                                            <div className="flex gap-2 w-full pt-1">
-                                                <Button variant="secondary" className="flex-1 text-xs h-11 rounded-full" onClick={() => onEditEvent(item)}><Pencil className="w-3.5 h-3.5" /> Редактировать</Button>
-                                                <button onClick={() => setConfirmCancel(itemIdNum)} className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs font-bold px-3 h-11 rounded-full bg-white text-[#B85C5C] border border-[#B85C5C]/30 hover:bg-[#B85C5C] hover:text-white transition"><Trash2 className="w-3.5 h-3.5" /> Отменить</button>
-                                            </div>
-                                        ) : isJoined ? (
-                                            <StatusMenuButton
-                                                className="w-full"
-                                                variant="success"
-                                                label="Вы идёте"
-                                                buttonClassName="!h-11 !rounded-full"
-                                                items={[{ label: 'Выйти из события', onClick: () => { void handleLeaveClick(itemIdNum); }, tone: 'danger' }]}
-                                                desktop={<button type="button" onClick={() => { void handleLeaveClick(itemIdNum); }} className="w-full bg-white hover:bg-[#B85C5C] text-[#B85C5C] hover:text-white border border-[#B85C5C]/35 font-bold h-11 text-xs rounded-full flex items-center justify-center gap-1.5 transition duration-150"><X className="w-3.5 h-3.5" /><span>Выйти из события</span></button>}
-                                            />
-                                        ) : isPending ? (
-                                            <StatusMenuButton
-                                                className="w-full"
-                                                variant="amber"
-                                                label="Заявка отправлена"
-                                                buttonClassName="!h-11 !rounded-full"
-                                                items={[{ label: 'Отменить заявку', onClick: () => { void handleLeaveClick(itemIdNum); }, tone: 'danger' }]}
-                                                desktop={<button type="button" onClick={() => { void handleLeaveClick(itemIdNum); }} className="w-full flex items-center justify-center gap-2.5 p-2.5 rounded-full bg-[#EDE6F5] hover:bg-[#F6E8E6] border border-[#5C4B7A]/20 hover:border-[#B85C5C]/30 text-xs text-[#5C4B7A] hover:text-[#B85C5C] transition-all duration-200 group/modalPending font-bold h-11"><Clock className="w-4 h-4 shrink-0 group-hover/modalPending:hidden animate-pulse" /><span className="group-hover/modalPending:hidden">Заявка отправлена</span><X className="w-4 h-4 hidden group-hover/modalPending:inline" /><span className="hidden group-hover/modalPending:inline">Отменить отправленную заявку</span></button>}
-                                            />
-                                        ) : isRePending ? (
-                                            <StatusMenuButton
-                                                className="w-full"
-                                                variant="amber"
-                                                label="Повторная заявка отправлена"
-                                                buttonClassName="!h-11 !rounded-full"
-                                                items={[{ label: 'Отменить повторную заявку', onClick: () => { void handleLeaveClick(itemIdNum); }, tone: 'danger' }]}
-                                                desktop={
-                                                    <button
-                                                        onClick={() => { void handleLeaveClick(itemIdNum); }}
-                                                        className="w-full flex items-center justify-center gap-2.5 p-2.5 rounded-full bg-[#EDE6F5] hover:bg-[#F6E8E6] border border-[#5C4B7A]/30 hover:border-[#B85C5C]/30 text-xs text-[#1C1824] hover:text-[#B85C5C] transition-all duration-200 group/modalRePending font-bold h-11 cursor-pointer"
-                                                    >
-                                                        <Clock className="w-3.5 h-3.5 animate-pulse group-hover/modalRePending:hidden" />
-                                                        <span className="group-hover/modalRePending:hidden">Повторная заявка отправлена</span>
-                                                        <X className="w-4 h-4 hidden group-hover/modalRePending:inline" />
-                                                        <span className="hidden group-hover/modalRePending:inline">Отменить повторную заявку</span>
-                                                    </button>
-                                                }
-                                            />
-                                        ) : isKicked ? (
-                                            <div className="w-full flex items-center justify-center gap-2.5 p-2.5 rounded-full bg-[#FFF1ED] border border-[#B85C5C]/20 text-xs text-[#B85C5C] font-bold select-none h-11">
-                                                <X className="w-4 h-4 shrink-0" />
-                                                <span>Вас исключили из встречи</span>
-                                            </div>
-                                        ) : isBanned ? (
-                                            <div className="w-full flex items-center justify-center gap-2.5 p-2.5 rounded-full bg-[#FFF1ED] border border-[#B85C5C]/20 text-xs text-[#B85C5C] font-bold select-none h-11">
-                                                <X className="w-4 h-4 shrink-0" />
-                                                <span>Вам отказано организатором</span>
-                                            </div>
-                                        ) : isRejected ? (
-                                            <button
-                                                type="button"
-                                                onClick={() => onApply && onApply(item)}
-                                                className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
-                                            >
-                                                <Plus className="w-4 h-4" />
-                                                <span>Подать заявку повторно</span>
-                                            </button>) : isPrivateComputed ? (
-                                            <button onClick={() => onApply(item)} className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-98"><Send className="w-4 h-4" /> <span>Оставить заявку</span></button>
-                                        ) : (
-                                            <button onClick={() => onJoin(item)} className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-98"><ThumbsUp className="w-4 h-4" /> <span>Вступить в событие</span></button>
-                                        )}
-                                    </div>
+                                    {isCluster
+                                        ? renderEventActionBar(item, 'flex')
+                                        : renderEventActionBar(item, 'hidden md:flex')}
                                     </>
                                     )}
                                 </div>
                             );
                         })}
                     </div>
+                    {!isCluster && singleEventForHeader
+                        && !(singleEventForHeader as any).loadingDetails
+                        && !(singleEventForHeader as any).detailsLoadFailed && (
+                        renderEventActionBar(
+                            singleEventForHeader,
+                            'flex md:hidden shrink-0 px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-[#FAF6F0]',
+                        )
+                    )}
                 </div>
             </div>
             <ForwardModal
