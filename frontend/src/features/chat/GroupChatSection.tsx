@@ -239,7 +239,7 @@ export default function GroupChatSection({
     const [isoEventDate, setIsoEventDate] = useState<string | null>(null);
     const [modalEventData, setModalEventData] = useState<any | null>(null);
     const [editingEvent, setEditingEvent] = useState<any | null>(null);
-    const [modalLoading, setModalLoading] = useState<boolean>(false);
+    const [participantsLoading, setParticipantsLoading] = useState(false);
     const [headerMenuOpen, setHeaderMenuOpen] = useState<boolean>(false);
     const [galleryOpen, setGalleryOpen] = useState(false);
     const [renameOpen, setRenameOpen] = useState(false);
@@ -1127,14 +1127,22 @@ export default function GroupChatSection({
                         <Search className="w-4 h-4" />
                     </button>
                     {!isPersonalGroup && (
-                    <button type="button" disabled={modalLoading} onClick={async () => {
-                        if (!activeRoom.eventId) return;
-                        setModalLoading(true);
-                        try {
-                            const res = await api.get(`/api/v1/social/events/${activeRoom.eventId}`);
-                            if (res.data) { setModalEventData({ ...res.data, user_status: 'JOINED' }); }
-                        } catch (err) { console.error("Не удалось открыть детали события:", err); }
-                        finally { setModalLoading(false); }
+                    <button type="button" onClick={() => {
+                        if (!activeRoom.eventId || modalEventData) return;
+                        setModalEventData({
+                            id: activeRoom.eventId,
+                            title: displayTitle || activeRoom.title,
+                            user_status: 'JOINED',
+                            loadingDetails: true,
+                        });
+                        void api.get(`/api/v1/social/events/${activeRoom.eventId}`).then((res) => {
+                            if (res.data) {
+                                setModalEventData((prev: any) => (prev ? { ...res.data, user_status: 'JOINED' } : null));
+                            }
+                        }).catch((err) => {
+                            console.error("Не удалось открыть детали события:", err);
+                            setModalEventData(null);
+                        });
                     }} className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-[#5C4B7A] transition" title="О встрече">
                         <Info className="w-4 h-4" />
                     </button>
@@ -1147,8 +1155,13 @@ export default function GroupChatSection({
                         <>
                             <div className="fixed inset-0 z-40 cursor-default" onClick={() => setHeaderMenuOpen(false)} />
                             <div className="absolute right-9 top-11 bg-white border border-slate-200/80 shadow-xl rounded-xl py-1.5 min-w-[190px] z-50 animate-fadeIn pointer-events-auto">
-                                <button type="button" disabled={modalLoading} onClick={async () => {
-                                    setHeaderMenuOpen(false); setModalLoading(true);
+                                <button type="button" onClick={async () => {
+                                    setHeaderMenuOpen(false);
+                                    const openId = isPersonalGroup ? activeRoom.id : activeRoom.eventId;
+                                    if (!openId) return;
+                                    setShowParticipantsId(openId);
+                                    setParticipantsLoading(true);
+                                    setParticipantsList([]);
                                     try {
                                         if (isPersonalGroup) {
                                             const partRes = await api.get(`/api/v1/social/chats/rooms/${activeRoom.id}/members`);
@@ -1162,7 +1175,6 @@ export default function GroupChatSection({
                                             })));
                                             setBannedParticipantsList([]);
                                             setShowBannedList(false);
-                                            setShowParticipantsId(activeRoom.id);
                                         } else {
                                         if (!activeRoom.eventId) return;
                                         const isOwner = Number(user?.id) === Number(activeRoom.ownerId);
@@ -1193,9 +1205,8 @@ export default function GroupChatSection({
                                             setChatCanVoteReputation(false);
                                         }
                                         setShowBannedList(false);
-                                        setShowParticipantsId(activeRoom.eventId);
                                         }
-                                    } catch (err) { console.error(err); } finally { setModalLoading(false); }
+                                    } catch (err) { console.error(err); } finally { setParticipantsLoading(false); }
                                 }} className="w-full text-left px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-[#EDE6F5] hover:text-[#5C4B7A] transition flex items-center gap-2">
                                     <Users className="w-3.5 h-3.5 text-slate-400" /><span>Участники чата</span>
                                 </button>
@@ -1330,7 +1341,7 @@ export default function GroupChatSection({
                             <div>
                                 <h4 className="text-sm font-semibold text-slate-900/60 tracking-tight flex items-center gap-2 ">
                                     <Users className="w-4 h-4 text-[#5C4B7A]/60 stroke-[2]" />
-                                    Участников чата ({participantsList.length})
+                                    Участников чата ({participantsLoading ? '…' : participantsList.length})
                                 </h4>
                             </div>
                             <button
@@ -1347,7 +1358,11 @@ export default function GroupChatSection({
                         </div>
 
                         <div className="flex-1 overflow-y-auto space-y-2.5 pt-4" style={{ scrollbarWidth: 'none' }}>
-                            {participantsList.map((p, idx) => {
+                            {participantsLoading ? (
+                                <p className="text-xs text-slate-400 italic text-center py-5">Загрузка списка соседей...</p>
+                            ) : participantsList.length === 0 ? (
+                                <p className="text-xs text-slate-400 italic text-center py-5">Пока никого нет</p>
+                            ) : participantsList.map((p, idx) => {
                                 const isItMe = user?.id && Number(p.userId) === Number(user.id);
                                 const isOrganizerOfEvent = !!p.owner;
 

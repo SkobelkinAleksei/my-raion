@@ -607,6 +607,7 @@ export default function EventDetailsModal({
     showParticipantsIdRef.current = showParticipantsId;
     const participantsBlockRef = useRef<HTMLDivElement>(null);
     const [participantsList, setParticipantsList] = useState<ParticipantUser[]>([]);
+    const [participantsLoading, setParticipantsLoading] = useState(false);
     const [bannedParticipantsList, setBannedParticipantsList] = useState<ParticipantUser[]>([]);
     const [restoreLoadingId, setRestoreLoadingId] = useState<number | null>(null);
     const [showBannedList, setShowBannedList] = useState(false);
@@ -638,11 +639,13 @@ export default function EventDetailsModal({
         // ЕСЛИ БЛОК УЖЕ ОТКРЫТ ДЛЯ ЭТОЙ ВСТРЕЧИ: при повторном клике закрываем его
         if (showParticipantsIdRef.current === eventId) {
             setShowParticipantsId(null);
+            setParticipantsLoading(false);
             return;
         }
 
         try {
             setShowParticipantsId(eventId);
+            setParticipantsLoading(true);
             setParticipantsList([]);
             setBannedParticipantsList([]);
             setShowBannedList(false);
@@ -674,6 +677,8 @@ export default function EventDetailsModal({
             }
         } catch (err) {
             console.error("Ошибка загрузки списка участников или репутации:", err);
+        } finally {
+            setParticipantsLoading(false);
         }
     };
 
@@ -1089,6 +1094,10 @@ export default function EventDetailsModal({
                                         </div>
                                     )}
 
+                                    {(item as any).loadingDetails ? (
+                                        <p className="text-sm text-slate-400 italic py-10 text-center">Загрузка встречи…</p>
+                                    ) : (
+                                    <>
                                     <div className="grid grid-cols-2 gap-2.5 w-full items-stretch">
                                         <InfoBlock icon={Calendar} label="Когда" value={formattedDate} />
                                         {(isOwner || isJoined) && !isHidden ? (
@@ -1147,13 +1156,13 @@ export default function EventDetailsModal({
                                             <div className="space-y-3">
                                                 <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-200/60">
                                                     <div className="min-w-0">
-                                                        <h4 className="text-[13px] md:text-sm font-bold text-[#1A1916] tracking-tight flex items-center gap-2 uppercase leading-snug"><Users className="w-4 h-4 text-[#5C4B7A] shrink-0" /><span className="min-w-0">Участники встречи ({participantsList.length})</span></h4>
+                                                        <h4 className="text-[13px] md:text-sm font-bold text-[#1A1916] tracking-tight flex items-center gap-2 uppercase leading-snug"><Users className="w-4 h-4 text-[#5C4B7A] shrink-0" /><span className="min-w-0">Участники встречи ({participantsLoading ? '…' : participantsList.length})</span></h4>
                                                         <p className="text-xs text-[#6B645C] mt-0.5 leading-snug">{canVoteReputation ? 'Поставьте оценку соседям за встречу' : windowState.closed || isPastEvent ? reputationPendingLabel(item.reputationOpensAt, windowState) : 'Список одобренных участников'}</p>
                                                     </div>
                                                     <button type="button" onClick={() => setShowParticipantsId(null)} className="w-8 h-8 rounded-xl bg-white text-slate-400 hover:text-slate-600 hover:border-slate-300 flex items-center justify-center transition border border-slate-200/60 shadow-sm active:scale-95 shrink-0"><X className="w-4 h-4 stroke-[2.5]" /></button>
                                                 </div>
                                                 <div className="space-y-2 max-h-[min(52vh,360px)] overflow-y-auto overscroll-contain pr-0.5" style={{ scrollbarWidth: 'none' }}>
-                                                    {participantsList.length === 0 ? ( <p className="text-xs text-slate-400 italic text-center py-5">Загрузка списка соседей...</p> ) : (
+                                                    {participantsLoading ? ( <p className="text-xs text-slate-400 italic text-center py-5">Загрузка списка соседей...</p> ) : participantsList.length === 0 ? ( <p className="text-xs text-slate-400 italic text-center py-5">Пока никого нет</p> ) : (
                                                         participantsList.map((p, index) => {
                                                             const isItMe = user?.id && Number(p.userId) === Number(user.id);
                                                             const isOrganizerOfEvent = index === 0;
@@ -1317,6 +1326,8 @@ export default function EventDetailsModal({
                                             <button onClick={() => onJoin(item)} className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-98"><ThumbsUp className="w-4 h-4" /> <span>Вступить в событие</span></button>
                                         )}
                                     </div>
+                                    </>
+                                    )}
                                 </div>
                             );
                         })}
