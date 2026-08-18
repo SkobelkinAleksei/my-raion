@@ -247,6 +247,8 @@ export default function GroupChatSection({
     const participantsLoadFailedRef = useRef(false);
     const participantsAbortRef = useRef<AbortController | null>(null);
     const lastParticipantsKeyRef = useRef<number | null>(null);
+    const eventDetailsAbortRef = useRef<AbortController | null>(null);
+    const eventDetailsLoadingRef = useRef(false);
     const [headerMenuOpen, setHeaderMenuOpen] = useState<boolean>(false);
     const [galleryOpen, setGalleryOpen] = useState(false);
     const [renameOpen, setRenameOpen] = useState(false);
@@ -321,6 +323,51 @@ export default function GroupChatSection({
     const roomPatchParams = {
         firstName: user?.firstName || '',
         lastName: user?.lastName || '',
+    };
+
+    const closeEventDetails = () => {
+        eventDetailsAbortRef.current?.abort();
+        eventDetailsAbortRef.current = null;
+        eventDetailsLoadingRef.current = false;
+        setModalEventData(null);
+    };
+
+    const loadEventDetails = async () => {
+        if (!activeRoom.eventId) return;
+        if (eventDetailsLoadingRef.current) return;
+        eventDetailsAbortRef.current?.abort();
+        const ac = new AbortController();
+        eventDetailsAbortRef.current = ac;
+        eventDetailsLoadingRef.current = true;
+        setModalEventData((prev: any) => (
+            prev && Number(prev.id) === Number(activeRoom.eventId)
+                ? { ...prev, loadingDetails: true, detailsLoadFailed: false }
+                : {
+                    id: activeRoom.eventId,
+                    title: displayTitle || activeRoom.title,
+                    user_status: 'JOINED',
+                    loadingDetails: true,
+                }
+        ));
+        try {
+            await runWithTimeoutRetry(async (signal) => {
+                const res = await api.get(`/api/v1/social/events/${activeRoom.eventId}`, { signal });
+                if (signal.aborted || eventDetailsAbortRef.current !== ac) return;
+                if (res.data) {
+                    setModalEventData({ ...res.data, user_status: 'JOINED' });
+                    return;
+                }
+                throw new Error('empty-event');
+            }, ac.signal);
+        } catch (err) {
+            if (eventDetailsAbortRef.current !== ac || ac.signal.aborted) return;
+            console.error("Не удалось открыть детали события:", err);
+            setModalEventData((prev: any) => (prev ? { ...prev, loadingDetails: false, detailsLoadFailed: true } : null));
+        } finally {
+            if (eventDetailsAbortRef.current === ac) {
+                eventDetailsLoadingRef.current = false;
+            }
+        }
     };
 
     const uploadRoomAvatar = async (file?: File) => {
@@ -1235,21 +1282,10 @@ export default function GroupChatSection({
                     </button>
                     {!isPersonalGroup && (
                     <button type="button" onClick={() => {
-                        if (!activeRoom.eventId || modalEventData) return;
-                        setModalEventData({
-                            id: activeRoom.eventId,
-                            title: displayTitle || activeRoom.title,
-                            user_status: 'JOINED',
-                            loadingDetails: true,
-                        });
-                        void api.get(`/api/v1/social/events/${activeRoom.eventId}`).then((res) => {
-                            if (res.data) {
-                                setModalEventData((prev: any) => (prev ? { ...res.data, user_status: 'JOINED' } : null));
-                            }
-                        }).catch((err) => {
-                            console.error("Не удалось открыть детали события:", err);
-                            setModalEventData(null);
-                        });
+                        if (!activeRoom.eventId) return;
+                        if (modalEventData?.loadingDetails) return;
+                        if (modalEventData && !modalEventData.detailsLoadFailed) return;
+                        void loadEventDetails();
                     }} className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-[#5C4B7A] transition" title="О встрече">
                         <Info className="w-4 h-4" />
                     </button>
@@ -1369,10 +1405,10 @@ export default function GroupChatSection({
                         const isPast = modalEventData.eventDate ? new Date(modalEventData.eventDate).getTime() < Date.now() : false;
                         const enrichedEvent = { ...modalEventData, status: isPast ? 'past' : (modalEventData.status || 'upcoming') };
                         return (
-                            <EventDetailsModal event={enrichedEvent} onClose={() => setModalEventData(null)} onJoin={() => {}} onApply={() => {}} onCancelEvent={() => setModalEventData(null)} onEditEvent={(ev) => { setModalEventData(null); setEditingEvent(ev); }} onLeave={async (id) => {
+                            <EventDetailsModal event={enrichedEvent} onClose={closeEventDetails} onRetryDetails={() => { void loadEventDetails(); }} onJoin={() => {}} onApply={() => {}} onCancelEvent={closeEventDetails} onEditEvent={(ev) => { closeEventDetails(); setEditingEvent(ev); }} onLeave={async (id) => {
                                 try {
                                     await api.post(`/api/v1/social/events/${id}/participants/leave`);
-                                    setModalEventData(null);
+                                    closeEventDetails();
                                     if (setEventRooms) { setEventRooms((prev: any[]) => (prev || []).filter(r => r && r.id !== activeRoom.id)); }
                                     onCloseChat();
                                 } catch (e) { console.error(e); }

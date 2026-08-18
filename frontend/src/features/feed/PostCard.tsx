@@ -20,6 +20,7 @@ import { buildSharePostContent, publishChatMessages } from '@/shared/utils/share
 import { showAppInfoToast } from '@/shared/utils/appToast';
 import { useAppBackHandler } from '@/shared/hooks/useAppBackHandler';
 import { useChatPhotoAttach } from '@/features/feed/useChatPhotoAttach';
+import { runWithTimeoutRetry } from '@/shared/lib/loadWithTimeoutRetry';
 
 // Интерфейс данных публикации
 export interface Post {
@@ -324,8 +325,17 @@ export default function PostCard(
         page: number;
         hasMore: boolean;
     }>({ items: [], page: 0, hasMore: false });
+    const [commentsLoading, setCommentsLoading] = useState(false);
+    const [commentsLoadFailed, setCommentsLoadFailed] = useState(false);
+    const commentsLoadingRef = useRef(false);
+    const commentsAbortRef = useRef<AbortController | null>(null);
 
     const closeCommentsModal = () => {
+        commentsAbortRef.current?.abort();
+        commentsAbortRef.current = null;
+        commentsLoadingRef.current = false;
+        setCommentsLoading(false);
+        setCommentsLoadFailed(false);
         setIsModalOpen(false);
         setHighlightedCommentId(null);
         setCommentsState({ items: [], page: 0, hasMore: false });
@@ -402,6 +412,45 @@ export default function PostCard(
         };
     };
 
+    const loadComments = async (focusId: number | null) => {
+        if (commentsLoadingRef.current) return;
+        commentsAbortRef.current?.abort();
+        const ac = new AbortController();
+        commentsAbortRef.current = ac;
+        commentsLoadingRef.current = true;
+        setCommentsLoading(true);
+        setCommentsLoadFailed(false);
+        try {
+            await runWithTimeoutRetry(async (signal) => {
+                const res = await api.get(`/api/v1/social/comments/public/post/${p.id}`, {
+                    params: { page: 0, size: focusId ? 50 : COMMENTS_PAGE_SIZE },
+                    signal,
+                });
+                if (signal.aborted || commentsAbortRef.current !== ac) return;
+                const rawComments = res.data.content || [];
+                const mapped = rawComments.map(mapCommentDto);
+                const chronologicalComments = [...mapped].reverse();
+                setCommentsState({
+                    items: chronologicalComments,
+                    page: 1,
+                    hasMore: !res.data.last
+                });
+                setTimeout(scrollToBottom, 100);
+                const totalCount = Number(res.data.totalElements) || post.commentsCount;
+                setLocalPost(prev => ({ ...prev, commentsCount: totalCount }));
+            }, ac.signal);
+        } catch (e) {
+            if (commentsAbortRef.current !== ac || ac.signal.aborted) return;
+            console.error(e);
+            setCommentsLoadFailed(true);
+        } finally {
+            if (commentsAbortRef.current === ac) {
+                commentsLoadingRef.current = false;
+                setCommentsLoading(false);
+            }
+        }
+    };
+
     const openCommentsModal = async () => {
         setIsModalOpen(true);
         const focusIdRaw = localStorage.getItem('openCommentId');
@@ -411,28 +460,7 @@ export default function PostCard(
             setHighlightedCommentId(focusId);
         }
         if (commentsState.items.length > 0) return;
-        try {
-            const res = await api.get(`/api/v1/social/comments/public/post/${p.id}`, {
-                params: { page: 0, size: focusId ? 50 : COMMENTS_PAGE_SIZE }
-            });
-
-            const rawComments = res.data.content || [];
-            const mapped = rawComments.map(mapCommentDto);
-
-            const chronologicalComments = [...mapped].reverse();
-            setCommentsState({
-                items: chronologicalComments,
-                page: 1,
-                hasMore: !res.data.last
-            });
-
-            setTimeout(scrollToBottom, 100);
-
-            const totalCount = Number(res.data.totalElements) || post.commentsCount;
-            setLocalPost(prev => ({ ...prev, commentsCount: totalCount }));
-        } catch (e) {
-            console.error(e);
-        }
+        await loadComments(focusId);
     };
 
     const loadMoreComments = async () => {
@@ -777,6 +805,9 @@ export default function PostCard(
                                 comments={commentsState.items}
                                 hasMore={commentsState.hasMore}
                                 onLoadMore={loadMoreComments}
+                                loading={commentsLoading}
+                                loadFailed={commentsLoadFailed}
+                                onRetryLoad={() => { void loadComments(highlightedCommentId); }}
                                 currentUserId={currentUserId}
                                 postOwnerId={p.authorId}
                                 currentUserAvatar={getAvatarUrl(currentUserId, user?.avatarUrl)}

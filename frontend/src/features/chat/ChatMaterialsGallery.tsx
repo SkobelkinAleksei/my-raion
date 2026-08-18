@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FileText, Image as ImageIcon, MessageSquare, Mic, X } from 'lucide-react';
 import api from '@/shared/lib/api';
+import { runWithTimeoutRetry } from '@/shared/lib/loadWithTimeoutRetry';
+import SegmentedRingLoader, { ParticipantsLoadRetry } from '@/shared/ui/SegmentedRingLoader';
 import { resolveChatMediaUrl } from '@/features/chat/chatPhotos';
 import { ChatMediaLightbox } from '@/features/chat/ChatPhotoGrid';
 import ChatVoiceBubble from '@/features/chat/ChatVoiceBubble';
@@ -78,8 +80,10 @@ export default function ChatMaterialsGallery({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const loadingRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
   const localAllRef = useRef<PhotoItem[] | null>(null);
   const sourceType = source.type;
   const sourceId = source.type === 'personal' ? source.partnerId : source.chatId;
@@ -107,12 +111,18 @@ export default function ChatMaterialsGallery({
       applySlice(localAllRef.current, nextPage, replace);
       return;
     }
+    let ac: AbortController | null = null;
+    if (replace) {
+      abortRef.current?.abort();
+      ac = new AbortController();
+      abortRef.current = ac;
+    }
     loadingRef.current = true;
-    if (replace) setLoading(true);
-    else setLoadingMore(true);
-    try {
-      const res = await api.get(pathFor(kind), { params: { page: nextPage, size: PAGE_SIZE } });
-      const data = res.data;
+    if (replace) {
+      setLoading(true);
+      setLoadFailed(false);
+    } else setLoadingMore(true);
+    const applyResponse = (data: any) => {
       if (Array.isArray(data) || (data?.items && data.items.length > PAGE_SIZE)) {
         const all = mapItems(Array.isArray(data) ? data : data.items);
         localAllRef.current = all;
@@ -128,22 +138,35 @@ export default function ChatMaterialsGallery({
         return next;
       });
       setPage(typeof data?.page === 'number' ? data.page : nextPage);
-    } catch (err) {
-      console.error('Не удалось загрузить материалы чата:', err);
-      if (replace) {
-        setItems([]);
-        setHasMore(false);
-        setTotal(0);
+    };
+    try {
+      if (replace && ac) {
+        await runWithTimeoutRetry(async (signal) => {
+          const res = await api.get(pathFor(kind), { params: { page: nextPage, size: PAGE_SIZE }, signal });
+          if (signal.aborted || abortRef.current !== ac) return;
+          applyResponse(res.data);
+        }, ac.signal);
+      } else {
+        const res = await api.get(pathFor(kind), { params: { page: nextPage, size: PAGE_SIZE } });
+        applyResponse(res.data);
       }
+    } catch (err) {
+      if (replace && ac && (ac.signal.aborted || abortRef.current !== ac)) return;
+      console.error('Не удалось загрузить материалы чата:', err);
+      if (replace) setLoadFailed(true);
     } finally {
       loadingRef.current = false;
-      setLoading(false);
-      setLoadingMore(false);
+      if (!replace || abortRef.current === ac) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }, [sourceType, sourceId]);
 
   useEffect(() => {
     if (!open) {
+      abortRef.current?.abort();
+      abortRef.current = null;
       loadingRef.current = false;
       localAllRef.current = null;
       setItems([]);
@@ -152,6 +175,8 @@ export default function ChatMaterialsGallery({
       setTotal(0);
       setLightboxIndex(null);
       setTab('photos');
+      setLoadFailed(false);
+      setLoading(false);
       return;
     }
     localAllRef.current = null;
@@ -191,9 +216,9 @@ export default function ChatMaterialsGallery({
               <div>
                 <h3 className="myraion-display text-[24px] text-[#1A1916] leading-tight">Материалы чата</h3>
                 <p className="text-[13px] text-[#6B645C] mt-1">
-                  {total > 0
+                  {loading ? '…' : total > 0
                     ? (items.length < total ? `Показано ${items.length} из ${total}` : `${total}`)
-                    : 'Пока пусто'}
+                    : loadFailed ? '' : 'Пока пусто'}
                 </p>
               </div>
               <button
@@ -221,8 +246,10 @@ export default function ChatMaterialsGallery({
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-5 space-y-6">
-            {loading ? (
-              <p className="text-sm text-[#6B645C] text-center py-10">Загрузка...</p>
+            {loading && items.length === 0 ? (
+              <SegmentedRingLoader />
+            ) : loadFailed && items.length === 0 ? (
+              <ParticipantsLoadRetry onRetry={() => { void loadPage(0, true, tab); }} />
             ) : items.length === 0 ? (
               <p className="text-sm text-[#6B645C] text-center py-10">
                 {tab === 'photos' ? 'В этом чате ещё нет фото' : tab === 'files' ? 'В этом чате ещё нет файлов' : 'В этом чате ещё нет голосовых'}

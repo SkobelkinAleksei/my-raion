@@ -42,6 +42,8 @@ import { fetchAvatarHistory, fetchGalleryPhoto, parsePhotoContextLabel, resolveP
 import Notifications from '@/pages/Notifications';
 import { NotificationProvider } from '@/shared/context/NotificationContext';
 import api from '@/shared/lib/api';
+import { runWithTimeoutRetry } from '@/shared/lib/loadWithTimeoutRetry';
+import SegmentedRingLoader, { ParticipantsLoadRetry } from '@/shared/ui/SegmentedRingLoader';
 import PostCard from '@/features/feed/PostCard';
 import { ReportProvider } from '@/features/report/ReportModal';
 import DevicePrompts from '@/features/device/DevicePrompts';
@@ -100,6 +102,11 @@ function AppContent() {
   const [globalIncomingRequests, setGlobalIncomingRequests] = useState<any[]>([]);
   const [globalAppEvent, setGlobalAppEvent] = useState<{ title?: string; eventDate?: string; locationName?: string } | null>(null);
   const [isGlobalAppsLoading, setIsGlobalAppsLoading] = useState(false);
+  const [globalAppsFailed, setGlobalAppsFailed] = useState(false);
+  const globalAppsAbortRef = useRef<AbortController | null>(null);
+  const globalAppsLoadingRef = useRef(false);
+  const globalAppsInFlightEventIdRef = useRef<number | null>(null);
+  const lastGlobalAppsEventIdRef = useRef<number | null>(null);
   const [globalDetailsEvent, setGlobalDetailsEvent] = useState<any | null>(null);
   const [globalEditingEvent, setGlobalEditingEvent] = useState<any | null>(null);
   const [globalPhoto, setGlobalPhoto] = useState<{
@@ -117,14 +124,24 @@ function AppContent() {
     }
   }, [isAuthenticated]);
 
+  const abortGlobalAppsLoad = useCallback(() => {
+    globalAppsAbortRef.current?.abort();
+    globalAppsAbortRef.current = null;
+    globalAppsLoadingRef.current = false;
+    globalAppsInFlightEventIdRef.current = null;
+    setIsGlobalAppsLoading(false);
+    setGlobalAppsFailed(false);
+  }, []);
+
   const closeAllOverlays = useCallback(() => {
+    abortGlobalAppsLoad();
     setGlobalActivePost(null);
     setGlobalPhoto(null);
     setGlobalAppEventId(null);
     setGlobalIncomingRequests([]);
     setGlobalAppEvent(null);
     setGlobalDetailsEvent(null);
-  }, []);
+  }, [abortGlobalAppsLoad]);
 
   const pushOverlay = useCallback((kind: AppOverlay) => {
     const prev = readHistoryState();
@@ -139,12 +156,13 @@ function AppContent() {
     if (kind === 'post') setGlobalActivePost(null);
     if (kind === 'photo') setGlobalPhoto(null);
     if (kind === 'event-requests') {
+      abortGlobalAppsLoad();
       setGlobalAppEventId(null);
       setGlobalIncomingRequests([]);
       setGlobalAppEvent(null);
     }
     if (kind === 'event-details') setGlobalDetailsEvent(null);
-  }, []);
+  }, [abortGlobalAppsLoad]);
 
   useAppBackHandler(!!globalAppEventId, () => closeOverlay('event-requests'));
 
@@ -212,6 +230,7 @@ function AppContent() {
       if (overlay !== 'post') setGlobalActivePost(null);
       if (overlay !== 'photo') setGlobalPhoto(null);
       if (overlay !== 'event-requests') {
+        abortGlobalAppsLoad();
         setGlobalAppEventId(null);
         setGlobalIncomingRequests([]);
         setGlobalAppEvent(null);
@@ -223,7 +242,7 @@ function AppContent() {
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [abortGlobalAppsLoad]);
 
   useEffect(() => {
     const handleCloseGlobal = () => closeOverlay('post');
@@ -379,21 +398,29 @@ function AppContent() {
       console.error('Ошибка модерации в глобальном окне:', err);
     }
   };
-  // Эффект №1: Перехват события для открытия модалки ЗАЯВОК (для Владельца встречи)
-  useEffect(() => {
-    const handleOpenGlobalRequests = async (e: Event) => {
-      const customEvent = e as CustomEvent;
-      const { eventId } = customEvent.detail;
-      if (!eventId || isNaN(Number(eventId))) return;
-
-      setIsGlobalAppsLoading(true);
-      setGlobalAppEventId(Number(eventId));
-      if (readHistoryState().overlay !== 'event-requests') pushOverlay('event-requests');
-      try {
+  const loadGlobalApps = useCallback(async (eventId: number) => {
+    if (globalAppsLoadingRef.current && globalAppsInFlightEventIdRef.current === eventId) return;
+    globalAppsAbortRef.current?.abort();
+    const ac = new AbortController();
+    globalAppsAbortRef.current = ac;
+    globalAppsLoadingRef.current = true;
+    globalAppsInFlightEventIdRef.current = eventId;
+    if (lastGlobalAppsEventIdRef.current !== eventId) {
+      setGlobalIncomingRequests([]);
+      setGlobalAppEvent(null);
+    }
+    setIsGlobalAppsLoading(true);
+    setGlobalAppsFailed(false);
+    try {
+      await runWithTimeoutRetry(async (signal) => {
         const [incomingRes, eventRes] = await Promise.all([
-          api.get('/api/v1/social/events/incoming'),
-          api.get(`/api/v1/social/events/${Number(eventId)}`).catch(() => ({ data: null }))
+          api.get('/api/v1/social/events/incoming', { signal }),
+          api.get(`/api/v1/social/events/${Number(eventId)}`, { signal }).catch((err) => {
+            if (signal.aborted) throw err;
+            return { data: null };
+          })
         ]);
+        if (signal.aborted || globalAppsAbortRef.current !== ac) return;
         const incomingMap = incomingRes.data || {};
         const requestsForThisEvent = incomingMap[Number(eventId)] || [];
         setGlobalAppEvent(eventRes.data ? {
@@ -404,23 +431,45 @@ function AppContent() {
 
         const enriched = await Promise.all(requestsForThisEvent.map(async (person: any) => {
           try {
-            const profileRes = await api.get(`/api/v1/social/users/${person.userId}/profile`);
+            const profileRes = await api.get(`/api/v1/social/users/${person.userId}/profile`, { signal });
             return { ...person, canMessage: !!profileRes.data?.canMessage };
-          } catch {
+          } catch (err) {
+            if (signal.aborted) throw err;
             return { ...person, canMessage: false };
           }
         }));
+        if (signal.aborted || globalAppsAbortRef.current !== ac) return;
         setGlobalIncomingRequests(enriched);
-      } catch (err) {
-        console.error("Не удалось загрузить входящие заявки в глобальный слой:", err);
-      } finally {
+        lastGlobalAppsEventIdRef.current = eventId;
+      }, ac.signal);
+    } catch (err) {
+      if (globalAppsAbortRef.current !== ac || ac.signal.aborted) return;
+      console.error("Не удалось загрузить входящие заявки в глобальный слой:", err);
+      setGlobalAppsFailed(true);
+    } finally {
+      if (globalAppsAbortRef.current === ac) {
+        globalAppsLoadingRef.current = false;
+        globalAppsInFlightEventIdRef.current = null;
         setIsGlobalAppsLoading(false);
       }
+    }
+  }, []);
+
+  // Эффект №1: Перехват события для открытия модалки ЗАЯВОК (для Владельца встречи)
+  useEffect(() => {
+    const handleOpenGlobalRequests = async (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { eventId } = customEvent.detail;
+      if (!eventId || isNaN(Number(eventId))) return;
+
+      setGlobalAppEventId(Number(eventId));
+      if (readHistoryState().overlay !== 'event-requests') pushOverlay('event-requests');
+      void loadGlobalApps(Number(eventId));
     };
 
     window.addEventListener('openGlobalRequestsModal', handleOpenGlobalRequests);
     return () => window.removeEventListener('openGlobalRequestsModal', handleOpenGlobalRequests);
-  }, [pushOverlay]);
+  }, [pushOverlay, loadGlobalApps]);
 
   // Эффект в App.tsx: Легковесный перехват карточки встречи со статусом пользователя
   useEffect(() => {
@@ -632,8 +681,10 @@ function AppContent() {
                     <button onClick={closeGlobalApps} className="w-9 h-9 rounded-full bg-white hover:bg-[#F2EBE3] text-[#1A1916] border border-[#1A1916]/10 flex items-center justify-center shrink-0"><X className="w-4 h-4" /></button>
                   </div>
                   <div className="flex-1 overflow-y-auto p-6 space-y-4" style={{ scrollbarWidth: 'none' }}>
-                    {isGlobalAppsLoading ? (
-                        <p className="text-sm text-[#6B645C] text-center py-8">Загрузка списка заявок...</p>
+                    {isGlobalAppsLoading && globalIncomingRequests.length === 0 ? (
+                        <SegmentedRingLoader />
+                    ) : globalAppsFailed && globalIncomingRequests.length === 0 ? (
+                        <ParticipantsLoadRetry onRetry={() => { if (globalAppEventId) void loadGlobalApps(globalAppEventId); }} />
                     ) : globalIncomingRequests.length === 0 ? (
                         <p className="text-sm text-[#6B645C] text-center py-8">Заявок больше нет</p>
                     ) : (

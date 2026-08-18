@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import api from '@/shared/lib/api';
+import { runWithTimeoutRetry } from '@/shared/lib/loadWithTimeoutRetry';
+import SegmentedRingLoader, { ParticipantsLoadRetry } from '@/shared/ui/SegmentedRingLoader';
 import { showAppInfoToast, showAppConfirm } from '@/shared/utils/appToast';
 import Button from '@/shared/ui/Button';
 import StatusMenuButton from '@/shared/ui/StatusMenuButton';
@@ -144,22 +146,39 @@ export default function Events({ initialTab = 'upcoming', mode = 'owner', target
   const [incomingMap, setIncomingMap] = useState<Record<number, any[]>>({});
   const [outgoingEvents, setOutgoingEvents] = useState<any[]>([]);
   const [isLoadingApps, setIsLoadingApps] = useState(false);
+  const [appsLoadFailed, setAppsLoadFailed] = useState(false);
+  const appsLoadingRef = useRef(false);
+  const appsAbortRef = useRef<AbortController | null>(null);
 
   const loadApplicationsData = async () => {
     if (!user) return;
+    appsAbortRef.current?.abort();
+    const ac = new AbortController();
+    appsAbortRef.current = ac;
+    appsLoadingRef.current = true;
     setIsLoadingApps(true);
+    setAppsLoadFailed(false);
     try {
-      if (appSubTab === 'incoming') {
-        const res = await api.get('/api/v1/social/events/incoming');
-        setIncomingMap(res.data || {});
-      } else {
-        const res = await api.get('/api/v1/social/events/outgoing');
-        setOutgoingEvents(res.data || []);
-      }
+      await runWithTimeoutRetry(async (signal) => {
+        if (appSubTab === 'incoming') {
+          const res = await api.get('/api/v1/social/events/incoming', { signal });
+          if (signal.aborted || appsAbortRef.current !== ac) return;
+          setIncomingMap(res.data || {});
+        } else {
+          const res = await api.get('/api/v1/social/events/outgoing', { signal });
+          if (signal.aborted || appsAbortRef.current !== ac) return;
+          setOutgoingEvents(res.data || []);
+        }
+      }, ac.signal);
     } catch (err) {
+      if (appsAbortRef.current !== ac || ac.signal.aborted) return;
       console.error('Ошибка загрузки данных в табе заявок:', err);
+      setAppsLoadFailed(true);
     } finally {
-      setIsLoadingApps(false);
+      if (appsAbortRef.current === ac) {
+        appsLoadingRef.current = false;
+        setIsLoadingApps(false);
+      }
     }
   };
   const handleModerateInCenter = async (eventId: number, participantId: number, action: 'approve' | 'reject') => {
@@ -556,8 +575,10 @@ export default function Events({ initialTab = 'upcoming', mode = 'owner', target
                   <span>Исходящие</span>{outgoingEvents.filter((e: any) => e.status === 'PENDING').length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#EDE6DC] text-[#1A1916]">{outgoingEvents.filter((e: any) => e.status === 'PENDING').length}</span>}{appSubTab === 'outgoing' && <div className="absolute bottom-0 left-0 right-0 h-px bg-[#1A1916]" />}
                 </button>
               </div>
-              {isLoadingApps ? (
-                  <p className="text-xs text-slate-400 italic text-center py-12">Загрузка данных центра заявок...</p>
+              {isLoadingApps && (appSubTab === 'incoming' ? Object.keys(incomingMap).length === 0 : outgoingEvents.length === 0) ? (
+                  <SegmentedRingLoader />
+              ) : appsLoadFailed && (appSubTab === 'incoming' ? Object.keys(incomingMap).length === 0 : outgoingEvents.length === 0) ? (
+                  <ParticipantsLoadRetry onRetry={() => { void loadApplicationsData(); }} />
               ) : appSubTab === 'outgoing' ? (
                   outgoingEvents.length === 0 ? <div className="text-center py-12 bg-[#FAF6F0] border border-[#1A1916]/10 rounded-3xl text-[#6B645C] text-sm">Вы пока не отправляли заявок на приватные встречи соседей.</div> : (
                       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">

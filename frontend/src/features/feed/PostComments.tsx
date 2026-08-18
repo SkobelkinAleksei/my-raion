@@ -3,6 +3,7 @@ import { Send, X, Pencil, Check, Reply, ThumbsUp, ThumbsDown } from 'lucide-reac
 import { theme } from '@/shared/ui/theme';
 import api from '@/shared/lib/api';
 import { ReportIconButton, useReport } from '@/features/report/ReportModal';
+import SegmentedRingLoader, { ParticipantsLoadRetry } from '@/shared/ui/SegmentedRingLoader';
 
 export interface Comment {
     id: number;
@@ -41,6 +42,9 @@ interface PostCommentsProps {
     className?: string;
     listScrollRef?: React.Ref<HTMLDivElement>;
     onListScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
+    loading?: boolean;
+    loadFailed?: boolean;
+    onRetryLoad?: () => void;
 }
 
 export default function PostComments({
@@ -60,6 +64,9 @@ export default function PostComments({
                                          className = '',
                                          listScrollRef,
                                          onListScroll,
+                                         loading = false,
+                                         loadFailed = false,
+                                         onRetryLoad,
                                      }: PostCommentsProps) {
     const [draft, setDraft] = useState('');
     const [editingComment, setEditingComment] = useState<Comment | null>(null);
@@ -184,7 +191,12 @@ export default function PostComments({
                 onScroll={onListScroll}
                 className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3"
             >
-            {hasMore && (
+            {loading && comments.length === 0 ? (
+                <SegmentedRingLoader />
+            ) : loadFailed && comments.length === 0 ? (
+                <ParticipantsLoadRetry onRetry={() => onRetryLoad?.()} />
+            ) : null}
+            {hasMore && !loading && (
                 <div className="w-full flex justify-center pb-2 pt-0.5">
                     <button
                         type="button"

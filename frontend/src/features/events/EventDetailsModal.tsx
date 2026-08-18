@@ -46,6 +46,7 @@ interface EventDetailsModalProps {
     onEditEvent: (event: any) => void;
     onLeave: (eventId: number) => void;
     openParticipantsImmediately?: boolean;
+    onRetryDetails?: () => void;
 }
 
 interface ParticipantUser {
@@ -597,7 +598,8 @@ export default function EventDetailsModal({
                                               onCancelEvent,
                                               onEditEvent,
                                               onLeave,
-                                              openParticipantsImmediately
+                                              openParticipantsImmediately,
+                                              onRetryDetails
                                           }: EventDetailsModalProps) {
     const { user } = useAuth();
     const { openReport } = useReport();
@@ -1151,7 +1153,9 @@ export default function EventDetailsModal({
                                     )}
 
                                     {(item as any).loadingDetails ? (
-                                        <p className="text-sm text-slate-400 italic py-10 text-center">Загрузка встречи…</p>
+                                        <SegmentedRingLoader />
+                                    ) : (item as any).detailsLoadFailed ? (
+                                        <ParticipantsLoadRetry onRetry={() => onRetryDetails?.()} />
                                     ) : (
                                     <>
                                     <div className="grid grid-cols-2 gap-2.5 w-full items-stretch">
