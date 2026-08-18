@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import api, { uploadChatPhoto, uploadChatVoice } from '@/shared/lib/api';
+import { runWithTimeoutRetry } from '@/shared/lib/loadWithTimeoutRetry';
+import SegmentedRingLoader, { ParticipantsLoadRetry } from '@/shared/ui/SegmentedRingLoader';
 import { theme } from '@/shared/ui/theme';
 import { useChat, formatSidebarMessage, mediaHintFromMessage, resolveMessageMedia, mapBundledForwardQuotes, isForwardQuoteCaption, isPersonalGroupRoom } from '@/features/chat/ChatContext';
 import { useAuth } from '@/shared/context/AuthContext';
@@ -240,6 +242,11 @@ export default function GroupChatSection({
     const [modalEventData, setModalEventData] = useState<any | null>(null);
     const [editingEvent, setEditingEvent] = useState<any | null>(null);
     const [participantsLoading, setParticipantsLoading] = useState(false);
+    const [participantsLoadFailed, setParticipantsLoadFailed] = useState(false);
+    const participantsLoadingRef = useRef(false);
+    const participantsLoadFailedRef = useRef(false);
+    const participantsAbortRef = useRef<AbortController | null>(null);
+    const lastParticipantsKeyRef = useRef<number | null>(null);
     const [headerMenuOpen, setHeaderMenuOpen] = useState<boolean>(false);
     const [galleryOpen, setGalleryOpen] = useState(false);
     const [renameOpen, setRenameOpen] = useState(false);
@@ -325,6 +332,106 @@ export default function GroupChatSection({
         } catch (e) {
             console.error(e);
             showAppInfoToast('Ошибка', 'Не удалось обновить аватар чата');
+        }
+    };
+
+    const closeParticipantsPanel = () => {
+        participantsAbortRef.current?.abort();
+        participantsAbortRef.current = null;
+        participantsLoadingRef.current = false;
+        participantsLoadFailedRef.current = false;
+        setShowParticipantsId(null);
+        setParticipantsLoading(false);
+        setParticipantsLoadFailed(false);
+    };
+
+    const loadParticipantsPanel = async () => {
+        const openId = isPersonalGroup ? activeRoom.id : activeRoom.eventId;
+        if (!openId) return;
+        if (participantsLoadingRef.current) return;
+
+        participantsAbortRef.current?.abort();
+        const ac = new AbortController();
+        participantsAbortRef.current = ac;
+        participantsLoadingRef.current = true;
+        participantsLoadFailedRef.current = false;
+
+        if (lastParticipantsKeyRef.current !== Number(openId)) {
+            setParticipantsList([]);
+            setBannedParticipantsList([]);
+        }
+        setShowParticipantsId(openId);
+        setParticipantsLoading(true);
+        setParticipantsLoadFailed(false);
+        setShowBannedList(false);
+
+        try {
+            await runWithTimeoutRetry(async (signal) => {
+                if (isPersonalGroup) {
+                    const partRes = await api.get(`/api/v1/social/chats/rooms/${activeRoom.id}/members`, { signal });
+                    if (signal.aborted || participantsAbortRef.current !== ac) return;
+                    setParticipantsList((partRes.data || []).map((p: any) => ({
+                        userId: p.userId,
+                        firstName: p.firstName,
+                        lastName: p.lastName,
+                        avatarUrl: p.avatarUrl,
+                        owner: p.owner,
+                        admin: p.admin,
+                    })));
+                    setBannedParticipantsList([]);
+                    lastParticipantsKeyRef.current = Number(openId);
+                    return;
+                }
+                if (!activeRoom.eventId) return;
+                const isOwner = Number(user?.id) === Number(activeRoom.ownerId);
+                const [partRes, eventRes, bannedRes, chatMembersRes] = await Promise.all([
+                    api.get(`/api/v1/social/events/${activeRoom.eventId}/participants`, { signal }),
+                    api.get(`/api/v1/social/events/${activeRoom.eventId}`, { signal }).catch((err) => {
+                        if (signal.aborted) throw err;
+                        return { data: null };
+                    }),
+                    isOwner
+                        ? api.get(`/api/v1/social/events/${activeRoom.eventId}/participants/banned`, { signal }).catch((err) => {
+                            if (signal.aborted) throw err;
+                            return { data: [] };
+                        })
+                        : Promise.resolve({ data: [] }),
+                    api.get(`/api/v1/social/chats/rooms/${activeRoom.id}/members`, { signal }).catch((err) => {
+                        if (signal.aborted) throw err;
+                        return { data: [] };
+                    }),
+                ]);
+                if (signal.aborted || participantsAbortRef.current !== ac) return;
+                const adminIds = new Set((chatMembersRes.data || []).filter((m: any) => m.admin || m.owner).map((m: any) => Number(m.userId)));
+                setParticipantsList((partRes.data || []).map((p: any) => ({
+                    ...p,
+                    owner: Number(p.userId) === Number(activeRoom.ownerId),
+                    admin: adminIds.has(Number(p.userId)),
+                })));
+                setBannedParticipantsList(bannedRes.data || []);
+                lastParticipantsKeyRef.current = Number(openId);
+                if (eventRes.data && eventRes.data.eventDate) {
+                    setChatEventDateStr(eventRes.data.eventDate);
+                    setChatRepOpensAt(eventRes.data.reputationOpensAt || '');
+                    setChatRepClosesAt(eventRes.data.reputationClosesAt || '');
+                    setChatCanVoteReputation(eventRes.data.canVoteReputation === true);
+                } else {
+                    setChatEventDateStr('');
+                    setChatRepOpensAt('');
+                    setChatRepClosesAt('');
+                    setChatCanVoteReputation(false);
+                }
+            }, ac.signal);
+        } catch (err) {
+            if (participantsAbortRef.current !== ac || ac.signal.aborted) return;
+            console.error(err);
+            participantsLoadFailedRef.current = true;
+            setParticipantsLoadFailed(true);
+        } finally {
+            if (participantsAbortRef.current === ac) {
+                participantsLoadingRef.current = false;
+                setParticipantsLoading(false);
+            }
         }
     };
 
@@ -1155,58 +1262,13 @@ export default function GroupChatSection({
                         <>
                             <div className="fixed inset-0 z-40 cursor-default" onClick={() => setHeaderMenuOpen(false)} />
                             <div className="absolute right-9 top-11 bg-white border border-slate-200/80 shadow-xl rounded-xl py-1.5 min-w-[190px] z-50 animate-fadeIn pointer-events-auto">
-                                <button type="button" onClick={async () => {
+                                <button type="button" onClick={() => {
                                     setHeaderMenuOpen(false);
                                     const openId = isPersonalGroup ? activeRoom.id : activeRoom.eventId;
                                     if (!openId) return;
-                                    setShowParticipantsId(openId);
-                                    setParticipantsLoading(true);
-                                    setParticipantsList([]);
-                                    try {
-                                        if (isPersonalGroup) {
-                                            const partRes = await api.get(`/api/v1/social/chats/rooms/${activeRoom.id}/members`);
-                                            setParticipantsList((partRes.data || []).map((p: any) => ({
-                                                userId: p.userId,
-                                                firstName: p.firstName,
-                                                lastName: p.lastName,
-                                                avatarUrl: p.avatarUrl,
-                                                owner: p.owner,
-                                                admin: p.admin,
-                                            })));
-                                            setBannedParticipantsList([]);
-                                            setShowBannedList(false);
-                                        } else {
-                                        if (!activeRoom.eventId) return;
-                                        const isOwner = Number(user?.id) === Number(activeRoom.ownerId);
-                                        const [partRes, eventRes, bannedRes, chatMembersRes] = await Promise.all([
-                                            api.get(`/api/v1/social/events/${activeRoom.eventId}/participants`),
-                                            api.get(`/api/v1/social/events/${activeRoom.eventId}`).catch(() => ({ data: null })),
-                                            isOwner
-                                                ? api.get(`/api/v1/social/events/${activeRoom.eventId}/participants/banned`).catch(() => ({ data: [] }))
-                                                : Promise.resolve({ data: [] }),
-                                            api.get(`/api/v1/social/chats/rooms/${activeRoom.id}/members`).catch(() => ({ data: [] })),
-                                        ]);
-                                        const adminIds = new Set((chatMembersRes.data || []).filter((m: any) => m.admin || m.owner).map((m: any) => Number(m.userId)));
-                                        setParticipantsList((partRes.data || []).map((p: any) => ({
-                                            ...p,
-                                            owner: Number(p.userId) === Number(activeRoom.ownerId),
-                                            admin: adminIds.has(Number(p.userId)),
-                                        })));
-                                        setBannedParticipantsList(bannedRes.data || []);
-                                        if (eventRes.data && eventRes.data.eventDate) {
-                                            setChatEventDateStr(eventRes.data.eventDate);
-                                            setChatRepOpensAt(eventRes.data.reputationOpensAt || '');
-                                            setChatRepClosesAt(eventRes.data.reputationClosesAt || '');
-                                            setChatCanVoteReputation(eventRes.data.canVoteReputation === true);
-                                        } else {
-                                            setChatEventDateStr('');
-                                            setChatRepOpensAt('');
-                                            setChatRepClosesAt('');
-                                            setChatCanVoteReputation(false);
-                                        }
-                                        setShowBannedList(false);
-                                        }
-                                    } catch (err) { console.error(err); } finally { setParticipantsLoading(false); }
+                                    if (showParticipantsId === openId && participantsLoadingRef.current) return;
+                                    if (showParticipantsId === openId && !participantsLoadFailedRef.current) return;
+                                    void loadParticipantsPanel();
                                 }} className="w-full text-left px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-[#EDE6F5] hover:text-[#5C4B7A] transition flex items-center gap-2">
                                     <Users className="w-3.5 h-3.5 text-slate-400" /><span>Участники чата</span>
                                 </button>
@@ -1325,7 +1387,7 @@ export default function GroupChatSection({
                     {/* Фиксированный невидимый слой на весь экран для перехвата клика «мимо» */}
                     <div
                         className="fixed inset-0 z-40 cursor-default"
-                        onClick={() => setShowParticipantsId(null)}
+                        onClick={closeParticipantsPanel}
                     />
 
                     {/* Само окно участников — остается без изменений, но теперь под защитой оверлея */}
@@ -1348,7 +1410,7 @@ export default function GroupChatSection({
                                 type="button"
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    setShowParticipantsId(null);
+                                    closeParticipantsPanel();
                                 }}
                                 className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition ml-1 cursor-pointer"
                                 title="Закрыть список"
@@ -1359,7 +1421,9 @@ export default function GroupChatSection({
 
                         <div className="flex-1 overflow-y-auto space-y-2.5 pt-4" style={{ scrollbarWidth: 'none' }}>
                             {participantsLoading ? (
-                                <p className="text-xs text-slate-400 italic text-center py-5">Загрузка списка соседей...</p>
+                                <SegmentedRingLoader />
+                            ) : participantsLoadFailed && participantsList.length === 0 ? (
+                                <ParticipantsLoadRetry onRetry={() => { void loadParticipantsPanel(); }} />
                             ) : participantsList.length === 0 ? (
                                 <p className="text-xs text-slate-400 italic text-center py-5">Пока никого нет</p>
                             ) : participantsList.map((p, idx) => {

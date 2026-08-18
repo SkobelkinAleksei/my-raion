@@ -21,6 +21,8 @@ import { createPortal } from 'react-dom';
 import Button from '@/shared/ui/Button';
 import StatusMenuButton from '@/shared/ui/StatusMenuButton';
 import api from '@/shared/lib/api';
+import { runWithTimeoutRetry } from '@/shared/lib/loadWithTimeoutRetry';
+import SegmentedRingLoader, { ParticipantsLoadRetry } from '@/shared/ui/SegmentedRingLoader';
 import { EventDto } from '@/features/map/DistrictMapSection';
 import { useAuth } from "@/shared/context/AuthContext";
 import { useAppBackHandler } from '@/shared/hooks/useAppBackHandler';
@@ -608,6 +610,11 @@ export default function EventDetailsModal({
     const participantsBlockRef = useRef<HTMLDivElement>(null);
     const [participantsList, setParticipantsList] = useState<ParticipantUser[]>([]);
     const [participantsLoading, setParticipantsLoading] = useState(false);
+    const [participantsLoadFailed, setParticipantsLoadFailed] = useState(false);
+    const participantsLoadingRef = useRef(false);
+    const participantsLoadFailedRef = useRef(false);
+    const participantsAbortRef = useRef<AbortController | null>(null);
+    const lastParticipantsEventIdRef = useRef<number | null>(null);
     const [bannedParticipantsList, setBannedParticipantsList] = useState<ParticipantUser[]>([]);
     const [restoreLoadingId, setRestoreLoadingId] = useState<number | null>(null);
     const [showBannedList, setShowBannedList] = useState(false);
@@ -635,50 +642,92 @@ export default function EventDetailsModal({
         }
     }, [event, openParticipantsImmediately]);
 
+    const closeParticipantsPanel = () => {
+        participantsAbortRef.current?.abort();
+        participantsAbortRef.current = null;
+        participantsLoadingRef.current = false;
+        participantsLoadFailedRef.current = false;
+        setShowParticipantsId(null);
+        setParticipantsLoading(false);
+        setParticipantsLoadFailed(false);
+    };
+
     const handleOpenParticipantsList = async (eventId: number, isPast: boolean) => {
-        // ЕСЛИ БЛОК УЖЕ ОТКРЫТ ДЛЯ ЭТОЙ ВСТРЕЧИ: при повторном клике закрываем его
         if (showParticipantsIdRef.current === eventId) {
-            setShowParticipantsId(null);
-            setParticipantsLoading(false);
+            if (participantsLoadingRef.current) return;
+            if (!participantsLoadFailedRef.current) {
+                closeParticipantsPanel();
+                return;
+            }
+        } else if (participantsLoadingRef.current) {
             return;
         }
 
-        try {
-            setShowParticipantsId(eventId);
-            setParticipantsLoading(true);
+        participantsAbortRef.current?.abort();
+        const ac = new AbortController();
+        participantsAbortRef.current = ac;
+        participantsLoadingRef.current = true;
+        participantsLoadFailedRef.current = false;
+
+        if (lastParticipantsEventIdRef.current !== eventId) {
             setParticipantsList([]);
             setBannedParticipantsList([]);
-            setShowBannedList(false);
-            const eventItem = eventsList.find((e) => Number(e.id) === Number(eventId));
-            const organizerId = eventItem
-                ? Number(eventItem.organizerId || (eventItem as any).organizer_id || 0)
-                : 0;
-            const isOwnerOpen = Boolean(
-                user?.id && (
-                    (eventItem as any)?.role === 'organizer'
-                    || Number(organizerId) === Number(user.id)
-                )
-            );
-            const [partRes, bannedRes] = await Promise.all([
-                api.get(`/api/v1/social/events/${eventId}/participants`),
-                isOwnerOpen
-                    ? api.get(`/api/v1/social/events/${eventId}/participants/banned`).catch(() => ({ data: [] }))
-                    : Promise.resolve({ data: [] })
-            ]);
-            setParticipantsList(partRes.data || []);
-            setBannedParticipantsList(bannedRes.data || []);
-            const joinedCount = Array.isArray(partRes.data) ? partRes.data.length : 0;
-            if (joinedCount > 0) {
-                setParticipantCountOverrides((prev) => ({ ...prev, [eventId]: joinedCount }));
-            }
-            if (isPast && user?.id) {
-                const votesRes = await api.get(`/api/v1/social/events/reputation/my-votes/${eventId}`);
-                setMyVotes(votesRes.data || []);
-            }
+            setMyVotes([]);
+        }
+        setShowParticipantsId(eventId);
+        setParticipantsLoading(true);
+        setParticipantsLoadFailed(false);
+        setShowBannedList(false);
+
+        try {
+            await runWithTimeoutRetry(async (signal) => {
+                const eventItem = eventsList.find((e) => Number(e.id) === Number(eventId));
+                const organizerId = eventItem
+                    ? Number(eventItem.organizerId || (eventItem as any).organizer_id || 0)
+                    : 0;
+                const isOwnerOpen = Boolean(
+                    user?.id && (
+                        (eventItem as any)?.role === 'organizer'
+                        || Number(organizerId) === Number(user.id)
+                    )
+                );
+                const [partRes, bannedRes] = await Promise.all([
+                    api.get(`/api/v1/social/events/${eventId}/participants`, { signal }),
+                    isOwnerOpen
+                        ? api.get(`/api/v1/social/events/${eventId}/participants/banned`, { signal }).catch((err) => {
+                            if (signal.aborted) throw err;
+                            return { data: [] };
+                        })
+                        : Promise.resolve({ data: [] })
+                ]);
+                if (signal.aborted || participantsAbortRef.current !== ac) return;
+                setParticipantsList(partRes.data || []);
+                setBannedParticipantsList(bannedRes.data || []);
+                lastParticipantsEventIdRef.current = eventId;
+                const joinedCount = Array.isArray(partRes.data) ? partRes.data.length : 0;
+                if (joinedCount > 0) {
+                    setParticipantCountOverrides((prev) => ({ ...prev, [eventId]: joinedCount }));
+                }
+                if (isPast && user?.id) {
+                    try {
+                        const votesRes = await api.get(`/api/v1/social/events/reputation/my-votes/${eventId}`, { signal });
+                        if (signal.aborted || participantsAbortRef.current !== ac) return;
+                        setMyVotes(votesRes.data || []);
+                    } catch (voteErr) {
+                        if (signal.aborted) throw voteErr;
+                    }
+                }
+            }, ac.signal);
         } catch (err) {
+            if (participantsAbortRef.current !== ac || ac.signal.aborted) return;
             console.error("Ошибка загрузки списка участников или репутации:", err);
+            participantsLoadFailedRef.current = true;
+            setParticipantsLoadFailed(true);
         } finally {
-            setParticipantsLoading(false);
+            if (participantsAbortRef.current === ac) {
+                participantsLoadingRef.current = false;
+                setParticipantsLoading(false);
+            }
         }
     };
 
@@ -824,8 +873,14 @@ export default function EventDetailsModal({
         : String((event as { id?: number } | null)?.id ?? '');
 
     useEffect(() => {
+        participantsAbortRef.current?.abort();
+        participantsAbortRef.current = null;
+        participantsLoadingRef.current = false;
+        participantsLoadFailedRef.current = false;
         setConfirmCancel(null);
         setShowParticipantsId(null);
+        setParticipantsLoading(false);
+        setParticipantsLoadFailed(false);
     }, [eventIdentity]);
 
     useEffect(() => {
@@ -858,6 +913,7 @@ export default function EventDetailsModal({
     const headerPhotosHidden = singleEventForHeader ? isEventPhotosHidden(singleEventForHeader, user?.id) : false;
 
     const closeModalSafely = () => {
+        closeParticipantsPanel();
         const shield = document.createElement('div');
         shield.setAttribute('aria-hidden', 'true');
         shield.style.cssText = 'position:fixed;inset:0;z-index:2147483647;';
@@ -867,7 +923,7 @@ export default function EventDetailsModal({
     };
 
     useAppBackHandler(true, closeModalSafely);
-    useAppBackHandler(!!showParticipantsId, () => setShowParticipantsId(null));
+    useAppBackHandler(!!showParticipantsId, closeParticipantsPanel);
 
     const handleLeaveClick = async (eventId: number) => {
         try {
@@ -1159,10 +1215,16 @@ export default function EventDetailsModal({
                                                         <h4 className="text-[13px] md:text-sm font-bold text-[#1A1916] tracking-tight flex items-center gap-2 uppercase leading-snug"><Users className="w-4 h-4 text-[#5C4B7A] shrink-0" /><span className="min-w-0">Участники встречи ({participantsLoading ? '…' : participantsList.length})</span></h4>
                                                         <p className="text-xs text-[#6B645C] mt-0.5 leading-snug">{canVoteReputation ? 'Поставьте оценку соседям за встречу' : windowState.closed || isPastEvent ? reputationPendingLabel(item.reputationOpensAt, windowState) : 'Список одобренных участников'}</p>
                                                     </div>
-                                                    <button type="button" onClick={() => setShowParticipantsId(null)} className="w-8 h-8 rounded-xl bg-white text-slate-400 hover:text-slate-600 hover:border-slate-300 flex items-center justify-center transition border border-slate-200/60 shadow-sm active:scale-95 shrink-0"><X className="w-4 h-4 stroke-[2.5]" /></button>
+                                                    <button type="button" onClick={closeParticipantsPanel} className="w-8 h-8 rounded-xl bg-white text-slate-400 hover:text-slate-600 hover:border-slate-300 flex items-center justify-center transition border border-slate-200/60 shadow-sm active:scale-95 shrink-0"><X className="w-4 h-4 stroke-[2.5]" /></button>
                                                 </div>
                                                 <div className="space-y-2 max-h-[min(52vh,360px)] overflow-y-auto overscroll-contain pr-0.5" style={{ scrollbarWidth: 'none' }}>
-                                                    {participantsLoading ? ( <p className="text-xs text-slate-400 italic text-center py-5">Загрузка списка соседей...</p> ) : participantsList.length === 0 ? ( <p className="text-xs text-slate-400 italic text-center py-5">Пока никого нет</p> ) : (
+                                                    {participantsLoading ? (
+                                                        <SegmentedRingLoader />
+                                                    ) : participantsLoadFailed && participantsList.length === 0 ? (
+                                                        <ParticipantsLoadRetry onRetry={() => { void handleOpenParticipantsList(itemIdNum, isPastEvent || canVoteReputation); }} />
+                                                    ) : participantsList.length === 0 ? (
+                                                        <p className="text-xs text-slate-400 italic text-center py-5">Пока никого нет</p>
+                                                    ) : (
                                                         participantsList.map((p, index) => {
                                                             const isItMe = user?.id && Number(p.userId) === Number(user.id);
                                                             const isOrganizerOfEvent = index === 0;
