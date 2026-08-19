@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
+import { openFeedbackForm } from '@/shared/lib/feedbackForm';
 import Button from '@/shared/ui/Button';
 import Card from '@/shared/ui/Card';
 import Container from '@/shared/ui/Container';
@@ -129,6 +130,15 @@ export default function SignIn({ setPage, onOpenLegal }: SignInProps) {
                                 className={`${theme.accent.text} font-bold hover:underline bg-transparent border-none p-0 cursor-pointer focus:outline-none`}
                             >
                                 Создать аккаунт
+                            </button>
+                        </p>
+                        <p className="text-center text-xs text-slate-500 mt-3">
+                            <button
+                                type="button"
+                                onClick={openFeedbackForm}
+                                className={`${theme.accent.text} font-semibold hover:underline bg-transparent border-none p-0 cursor-pointer`}
+                            >
+                                Нашли баг или есть идея?
                             </button>
                         </p>
                         <p className="text-center text-[11px] text-slate-400 mt-3 leading-relaxed">

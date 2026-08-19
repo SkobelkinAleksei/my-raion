@@ -47,6 +47,7 @@ import SegmentedRingLoader, { ParticipantsLoadRetry } from '@/shared/ui/Segmente
 import PostCard from '@/features/feed/PostCard';
 import { ReportProvider } from '@/features/report/ReportModal';
 import DevicePrompts from '@/features/device/DevicePrompts';
+import FeedbackHint from '@/features/feedback/FeedbackHint';
 
 function requestsWaitingLabel(count: number): string {
   const n10 = count % 10;
@@ -560,6 +561,7 @@ function AppContent() {
         <Sidebar page={page} setPage={(targetPage) => navigate(targetPage)} />
         <MobileTopBar page={page} setPage={(targetPage) => navigate(targetPage)} />
         <DevicePrompts />
+        {isAuthenticated && <FeedbackHint />}
         <MobileSwipeBack />
         <MobilePullToRefresh />
         <main className={`md:ml-64 min-h-dvh md:min-h-screen ${

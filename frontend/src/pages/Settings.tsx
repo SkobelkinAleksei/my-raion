@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { showAppConfirm } from '@/shared/utils/appToast';
 import { requestChangePage } from '@/shared/utils/navigation';
+import { openFeedbackForm } from '@/shared/lib/feedbackForm';
 
 interface AddressSuggestion {
   value: string;
@@ -740,6 +741,25 @@ export default function Settings() {
                 <div>
                   <div className="text-sm font-bold text-slate-800">Смена пароля аккаунта</div>
                   <div className="text-xs text-slate-400 font-medium mt-0.5">Периодически обновляйте ключ для защиты профиля</div>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+            </button>
+          </Card>
+
+          <Card className="p-5 sm:p-6">
+            <button
+                type="button"
+                onClick={openFeedbackForm}
+                className="w-full flex items-center justify-between p-3 bg-slate-50 border border-slate-100 rounded-xl hover:bg-slate-100/60 transition group text-left"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-white border border-slate-200/50 flex items-center justify-center text-slate-400 group-hover:text-[#5C4B7A] transition">
+                  <MessageSquare className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-slate-800">Баг или идея</div>
+                  <div className="text-xs text-slate-400 font-medium mt-0.5">Напишите, что сломалось или что улучшить</div>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
