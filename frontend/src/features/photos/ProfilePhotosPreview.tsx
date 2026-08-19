@@ -28,18 +28,26 @@ export default function ProfilePhotosPreview({
 }) {
   const [viewer, setViewer] = useState<{ items: GalleryPhoto[]; index: number } | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const canScroll = urls.length > 4 || total > 4;
   const [canLeft, setCanLeft] = useState(false);
-  const [canRight, setCanRight] = useState(false);
+  const [canRight, setCanRight] = useState(canScroll);
 
   const syncArrows = () => {
     const el = scrollerRef.current;
-    if (!el) {
+    if (!canScroll) {
       setCanLeft(false);
       setCanRight(false);
       return;
     }
+    if (!el || el.clientWidth < 2) {
+      setCanLeft(false);
+      setCanRight(true);
+      return;
+    }
     setCanLeft(el.scrollLeft > 2);
-    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+    const measuredMore = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    const layoutNotReady = el.scrollWidth <= el.clientWidth + 2;
+    setCanRight(measuredMore || (layoutNotReady && el.scrollLeft <= 2));
   };
 
   useEffect(() => {
@@ -49,11 +57,24 @@ export default function ProfilePhotosPreview({
     const onScroll = () => syncArrows();
     el.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', syncArrows);
+    const ro = new ResizeObserver(() => syncArrows());
+    ro.observe(el);
+    const imgs = Array.from(el.querySelectorAll('img'));
+    imgs.forEach((img) => {
+      if (!img.complete) img.addEventListener('load', syncArrows);
+    });
+    const raf = window.requestAnimationFrame(() => {
+      syncArrows();
+      window.requestAnimationFrame(syncArrows);
+    });
     return () => {
+      window.cancelAnimationFrame(raf);
       el.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', syncArrows);
+      ro.disconnect();
+      imgs.forEach((img) => img.removeEventListener('load', syncArrows));
     };
-  }, [urls]);
+  }, [urls, total, canScroll]);
 
   const scrollByCard = (dir: -1 | 1) => {
     const el = scrollerRef.current;
