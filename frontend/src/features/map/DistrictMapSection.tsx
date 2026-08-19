@@ -585,7 +585,7 @@ const DistrictMapSection = forwardRef<any, DistrictMapSectionProps>((
                     onLeave={(id) => {
                         const source = Array.isArray(selectedEvent) ? selectedEvent : selectedEvent ? [selectedEvent] : [];
                         const current = source.find((e) => Number(e.id) === Number(id));
-                        void handleParticipantAction({ ...(current || {}), id } as any, 'LEAVE');
+                        return handleParticipantAction({ ...(current || {}), id } as any, 'LEAVE');
                     }}
                     onCancelEvent={(ev) => { if (onCancelEvent) onCancelEvent(ev); setSelectedEvent(null); }}
                     onEditEvent={(ev) => {

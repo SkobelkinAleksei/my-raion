@@ -928,16 +928,13 @@ export default function EventDetailsModal({
     useAppBackHandler(!!showParticipantsId, closeParticipantsPanel);
 
     const handleLeaveClick = async (item: EventDto) => {
-        const itemIdNum = Number(item.id);
         try {
-            await Promise.resolve(onLeave(itemIdNum));
+            await Promise.resolve(onLeave(Number(item.id)));
         } catch (err) {
             console.error(err);
             return;
         }
-        closeParticipantsPanel();
-        setStatusOverrides((prev) => ({ ...prev, [itemIdNum]: 'NONE' }));
-        await syncStatusFromServer(item, 'NONE');
+        closeModalSafely();
     };
 
     const itemStatus = (item: any, itemIdNum: number) =>
