@@ -1080,7 +1080,7 @@ export default function EventDetailsModal({
                 ) : isRejected ? (
                     <button
                         type="button"
-                        onClick={() => onApply && void handleApplyClick(item)}
+                        onClick={() => void handleApplyClick(item)}
                         className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
                     >
                         <Plus className="w-4 h-4" />
