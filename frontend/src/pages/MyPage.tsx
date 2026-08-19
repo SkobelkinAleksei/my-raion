@@ -54,6 +54,7 @@ export default function MyPage({ navigate }: MyPageProps) {
   });
   const [photoPreview, setPhotoPreview] = useState<{ total: number; urls: string[] }>({ total: 0, urls: [] });
   const [coverOpen, setCoverOpen] = useState(false);
+  const [coverDraft, setCoverDraft] = useState<string | null>(null);
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [coverCrop, setCoverCrop] = useState<File | null>(null);
   const [avatarCrop, setAvatarCrop] = useState<File | null>(null);
@@ -128,7 +129,7 @@ export default function MyPage({ navigate }: MyPageProps) {
   const loadPhotoPreview = async () => {
     if (!user) return;
     try {
-      const data = await fetchPhotos(Number(user.id), { page: 0, size: 4 });
+      const data = await fetchPhotos(Number(user.id), { page: 0, size: 16 });
       setPhotoPreview({
         total: Number(data.total) || 0,
         urls: (data.items || []).map((item) => resolvePhotoUrl(item.url)),
@@ -141,10 +142,19 @@ export default function MyPage({ navigate }: MyPageProps) {
     try {
       await updateCover(mode, color);
       await refreshUser();
+      setCoverDraft(null);
       setCoverOpen(false);
     } catch (error: any) {
       showAppInfoToast('Обложка', error?.response?.data?.detail || 'Не удалось сохранить фон');
     }
+  };
+  const closeCoverMenu = async (commit: boolean) => {
+    if (commit && coverDraft) {
+      await saveCover('COLOR', coverDraft);
+      return;
+    }
+    setCoverDraft(null);
+    setCoverOpen(false);
   };
   const saveCoverPhoto = async (file: File) => {
     await uploadCoverFile(file);
@@ -204,20 +214,21 @@ export default function MyPage({ navigate }: MyPageProps) {
   }
 
   const coverMode = String(user.coverMode || '').toUpperCase();
-  const hasCoverBanner = coverMode === 'COLOR' || coverMode === 'PHOTO';
+  const hasCoverBanner = coverMode === 'COLOR' || coverMode === 'PHOTO' || !!coverDraft;
+  const previewCover = coverDraft || (coverMode === 'COLOR' ? (user.coverColor || DEFAULT_COVER_COLOR) : null);
 
   return (
       <div className="max-w-3xl mx-auto px-4 sm:px-5 lg:px-6 py-4 md:py-6 lg:py-8 min-h-screen">
         <Card padded={false} className={`relative overflow-visible mb-4 md:mb-5 lg:mb-6 h-auto ${hasCoverBanner ? '' : '!rounded-[24px]'}`}>
           {hasCoverBanner && (
           <div
-            className={`h-24 md:h-28 lg:h-32 relative overflow-hidden rounded-t-[24px] lg:rounded-t-[32px] ${coverMode === 'COLOR' ? '' : 'bg-[#EDE6F5]'}`}
-            style={coverMode === 'COLOR' ? { background: user.coverColor || DEFAULT_COVER_COLOR } : undefined}
+            className={`h-24 md:h-28 lg:h-32 relative overflow-hidden rounded-t-[24px] lg:rounded-t-[32px] ${previewCover ? '' : 'bg-[#EDE6F5]'}`}
+            style={previewCover ? { background: previewCover } : undefined}
           >
-            {coverMode === 'PHOTO' && user.coverUrl && (
+            {coverMode === 'PHOTO' && user.coverUrl && !coverDraft && (
               <img src={resolvePhotoUrl(user.coverUrl)} alt="" className="absolute inset-0 w-full h-full object-cover" />
             )}
-            {coverMode !== 'PHOTO' && (
+            {(coverMode !== 'PHOTO' || coverDraft) && (
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,rgba(255,255,255,0.25),transparent_60%)]" />
             )}
           </div>
@@ -235,7 +246,13 @@ export default function MyPage({ navigate }: MyPageProps) {
             />
             <button
               type="button"
-              onClick={() => setCoverOpen((open) => !open)}
+              onClick={() => {
+                if (coverOpen) void closeCoverMenu(true);
+                else {
+                  setCoverDraft(null);
+                  setCoverOpen(true);
+                }
+              }}
               className="absolute top-2.5 right-2.5 md:top-3 md:right-3 z-20 w-8 h-8 md:w-auto md:h-8 md:px-3 rounded-full bg-white/95 md:bg-white text-[#5C4B7A] text-[11px] font-semibold inline-flex items-center justify-center md:gap-1.5 border border-[#1C1824]/12 shadow-sm"
               aria-label="Фон"
               title="Фон"
@@ -245,18 +262,32 @@ export default function MyPage({ navigate }: MyPageProps) {
             </button>
           {coverOpen && (
             <>
-              <button type="button" className="fixed inset-0 z-[35] cursor-default" aria-label="Закрыть меню фона" onClick={() => setCoverOpen(false)} />
+              <button type="button" className="fixed inset-0 z-[35] cursor-default" aria-label="Закрыть меню фона" onClick={() => {
+                if (document.activeElement?.getAttribute?.('type') === 'color') return;
+                void closeCoverMenu(true);
+              }} />
               <div className="absolute top-12 right-3 z-40 w-52 max-w-[calc(100%-1.5rem)] bg-white rounded-xl shadow-[0_16px_40px_rgba(28,24,36,0.28)] border border-[#1C1824]/15 p-1.5 space-y-0.5">
               <label className="flex items-center justify-between text-[12px] text-[#1C1824] px-2 py-1.5">
                 Цвет
                 <input
                   type="color"
-                  value={user.coverColor || DEFAULT_COVER_COLOR}
-                  onChange={(e) => saveCover('COLOR', e.target.value)}
+                  value={coverDraft || user.coverColor || DEFAULT_COVER_COLOR}
+                  onInput={(e) => setCoverDraft(e.currentTarget.value)}
+                  onChange={(e) => setCoverDraft(e.currentTarget.value)}
                   className="w-7 h-7 rounded cursor-pointer bg-transparent"
                 />
               </label>
-              <button type="button" onClick={() => saveCover('COLOR', randomWarmCoverColor())} className="w-full text-left text-[12px] px-2 py-1.5 rounded-lg hover:bg-[#EDE6F5]">
+              {coverDraft && (
+                <div className="flex gap-1 px-1.5 pb-1">
+                  <button type="button" onClick={() => void closeCoverMenu(false)} className="flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg text-[#6B645C] hover:bg-[#F2EBE3]">
+                    Отмена
+                  </button>
+                  <button type="button" onClick={() => void closeCoverMenu(true)} className="flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg bg-[#5C4B7A] text-white hover:bg-[#4A3C66]">
+                    Готово
+                  </button>
+                </div>
+              )}
+              <button type="button" onClick={() => setCoverDraft(randomWarmCoverColor())} className="w-full text-left text-[12px] px-2 py-1.5 rounded-lg hover:bg-[#EDE6F5]">
                 Случайный цвет
               </button>
               <button type="button" onClick={() => { coverFileRef.current?.click(); }} className="w-full text-left text-[12px] px-2 py-1.5 rounded-lg hover:bg-[#EDE6F5] inline-flex items-center gap-1.5">

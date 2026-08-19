@@ -771,11 +771,8 @@ function AppContent() {
                   try {
                     await api.post(`/api/v1/social/events/${id}/participants/leave`);
                     window.dispatchEvent(new CustomEvent('refreshNeighborStatuses'));
+                    setGlobalDetailsEvent((prev: any) => prev ? { ...prev, user_status: 'NONE', userStatus: 'NONE' } : null);
                   } catch (err) { console.error(err); }
-                  setGlobalDetailsEvent(null);
-                  if (readHistoryState().overlay === 'event-details') {
-                    window.history.replaceState({ ...readHistoryState(), overlay: null }, '', window.location.href);
-                  }
                 }}
                 onCancelEvent={() => closeOverlay('event-details')}
                 onEditEvent={(ev) => {

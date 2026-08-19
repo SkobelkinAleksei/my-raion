@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ChevronRight, Image as ImageIcon, Plus } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Image as ImageIcon, Plus } from 'lucide-react';
 import { ChatMediaLightbox } from '@/features/chat/ChatPhotoGrid';
 import {
   deleteGalleryPhoto,
@@ -27,6 +27,41 @@ export default function ProfilePhotosPreview({
   onChanged?: () => void;
 }) {
   const [viewer, setViewer] = useState<{ items: GalleryPhoto[]; index: number } | null>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+
+  const syncArrows = () => {
+    const el = scrollerRef.current;
+    if (!el) {
+      setCanLeft(false);
+      setCanRight(false);
+      return;
+    }
+    setCanLeft(el.scrollLeft > 2);
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  };
+
+  useEffect(() => {
+    syncArrows();
+    const el = scrollerRef.current;
+    if (!el) return;
+    const onScroll = () => syncArrows();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', syncArrows);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', syncArrows);
+    };
+  }, [urls]);
+
+  const scrollByCard = (dir: -1 | 1) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const card = el.querySelector('[data-photo-card]') as HTMLElement | null;
+    const step = (card?.offsetWidth || 80) + 8;
+    el.scrollBy({ left: dir * step, behavior: 'smooth' });
+  };
 
   const openAt = async (index: number) => {
     try {
@@ -76,17 +111,45 @@ export default function ProfilePhotosPreview({
           </div>
           <ChevronRight className="w-4 h-4 text-[#8A8494] group-hover:translate-x-0.5 transition" />
         </button>
-        <div className="flex gap-2 h-20 md:h-24 lg:h-36">
-          {urls.slice(0, 4).map((url, i) => (
+        <div data-photo-swipe className="relative">
+          <div
+            ref={scrollerRef}
+            className="flex gap-2 h-20 md:h-24 lg:h-36 overflow-x-auto overflow-y-hidden snap-x snap-mandatory touch-pan-x overscroll-x-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {urls.map((url, i) => (
+              <button
+                key={`${url}-${i}`}
+                type="button"
+                data-photo-card
+                onClick={() => void openAt(i)}
+                className={`snap-start h-full rounded-2xl overflow-hidden bg-[#EDE6F5] ${
+                  urls.length > 4 ? 'shrink-0 w-[calc((100%-1.5rem)/4)]' : 'flex-1 min-w-0'
+                }`}
+              >
+                <img src={url} alt="" draggable={false} className="w-full h-full object-cover select-none pointer-events-none" />
+              </button>
+            ))}
+          </div>
+          {canLeft && (
             <button
-              key={`${url}-${i}`}
               type="button"
-              onClick={() => void openAt(i)}
-              className="flex-1 min-w-0 h-full rounded-2xl overflow-hidden bg-[#EDE6F5]"
+              onClick={() => scrollByCard(-1)}
+              className="hidden md:flex absolute left-1 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 border border-[#1A1916]/10 text-[#1A1916] items-center justify-center hover:bg-white shadow-sm z-10"
+              aria-label="Предыдущие фото"
             >
-              <img src={url} alt="" className="w-full h-full object-cover" />
+              <ChevronLeft className="w-4 h-4" />
             </button>
-          ))}
+          )}
+          {canRight && (
+            <button
+              type="button"
+              onClick={() => scrollByCard(1)}
+              className="hidden md:flex absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 border border-[#1A1916]/10 text-[#1A1916] items-center justify-center hover:bg-white shadow-sm z-10"
+              aria-label="Следующие фото"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
       {viewer && (

@@ -288,28 +288,25 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             if (action === 'JOIN') endpoint = `/api/v1/social/events/${event.id}/participants/join`;
             if (action === 'APPLY') endpoint = `/api/v1/social/events/${event.id}/participants/apply`;
             const response = await api.post(endpoint);
+            const nextStatus = (action === 'JOIN' ? 'JOINED' : action === 'APPLY' ? 'PENDING' : 'NONE').toUpperCase();
+            setSharedEventData({
+                ...event,
+                ...(response.data || {}),
+                userStatus: nextStatus,
+                user_status: nextStatus,
+            });
             if (action === 'LEAVE') {
-                setSharedEventData(null);
                 window.dispatchEvent(new CustomEvent('refreshNeighborStatuses'));
-                return;
             }
-            if (response.data) {
-                const nextStatus = (action === 'JOIN' ? 'JOINED' : action === 'APPLY' ? 'PENDING' : 'NOT_PARTICIPATING').toUpperCase();
-                setSharedEventData({
-                    ...event,
-                    ...response.data,
-                    userStatus: nextStatus
-                });
-                if (action === 'APPLY') {
-                    const wasRejected = String(event.userStatus || event.user_status || '').toUpperCase() === 'REJECTED';
-                    const title = event.title || 'встречу';
-                    showAppInfoToast(
-                        wasRejected ? 'Повторная заявка' : 'Заявка отправлена',
-                        wasRejected
-                            ? `Повторная заявка на «${title}» отправлена организатору`
-                            : `Заявка на приватную встречу «${title}» отправлена организатору`
-                    );
-                }
+            if (action === 'APPLY') {
+                const wasRejected = String(event.userStatus || event.user_status || '').toUpperCase() === 'REJECTED';
+                const title = event.title || 'встречу';
+                showAppInfoToast(
+                    wasRejected ? 'Повторная заявка' : 'Заявка отправлена',
+                    wasRejected
+                        ? `Повторная заявка на «${title}» отправлена организатору`
+                        : `Заявка на приватную встречу «${title}» отправлена организатору`
+                );
             }
         } catch (error) {
             console.error(`Ошибка действия ${action} в глобальном контексте:`, error);

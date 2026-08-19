@@ -34,7 +34,7 @@ export default function MobileSwipeBack() {
 
     const onStart = (e: TouchEvent) => {
       if (!isCompactViewport() || e.touches.length !== 1) return;
-      if ((e.target as Element | null)?.closest?.('[data-district-map], .leaflet-container')) return;
+      if ((e.target as Element | null)?.closest?.('[data-district-map], .leaflet-container, [data-photo-swipe]')) return;
       const touch = e.touches[0];
       const origin = swipeBackOriginX();
       if (touch.clientX < origin || touch.clientX > edgeLimit()) return;

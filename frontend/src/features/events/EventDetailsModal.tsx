@@ -9,7 +9,6 @@ import {
     Send,
     Pencil,
     Trash2,
-    CheckCircle2,
     Clock,
     AlertTriangle,
     Zap,
@@ -623,6 +622,7 @@ export default function EventDetailsModal({
     const [myVotes, setMyVotes] = useState<VoteData[]>([]);
     const [votingLoading, setVotingLoading] = useState<string | null>(null);
     const [participantCountOverrides, setParticipantCountOverrides] = useState<Record<number, number>>({});
+    const [statusOverrides, setStatusOverrides] = useState<Record<number, string>>({});
 
     const eventsList: EventDto[] = React.useMemo(() => {
         if (!event) return [];
@@ -927,14 +927,73 @@ export default function EventDetailsModal({
     useAppBackHandler(true, closeModalSafely);
     useAppBackHandler(!!showParticipantsId, closeParticipantsPanel);
 
-    const handleLeaveClick = async (eventId: number) => {
+    const handleLeaveClick = async (item: EventDto) => {
+        const itemIdNum = Number(item.id);
         try {
-            await Promise.resolve(onLeave(eventId));
+            await Promise.resolve(onLeave(itemIdNum));
         } catch (err) {
             console.error(err);
-        } finally {
-            closeModalSafely();
+            return;
         }
+        closeParticipantsPanel();
+        setStatusOverrides((prev) => ({ ...prev, [itemIdNum]: 'NONE' }));
+        await syncStatusFromServer(item, 'NONE');
+    };
+
+    const itemStatus = (item: any, itemIdNum: number) =>
+        String(statusOverrides[itemIdNum] || item?.user_status || item?.userStatus || '').toUpperCase().trim();
+
+    const syncStatusFromServer = async (item: EventDto, fallback: string) => {
+        const itemIdNum = Number(item.id);
+        const wasJoined = itemStatus(item, itemIdNum) === 'JOINED';
+        try {
+            const statusRes = await api.get(`/api/v1/social/events/${itemIdNum}/participants/status`);
+            const raw = String(statusRes.data?.status || fallback).toUpperCase().trim();
+            const status = (!raw || raw === 'NOT_PARTICIPATING') ? 'NONE' : raw;
+            setStatusOverrides((prev) => ({ ...prev, [itemIdNum]: status }));
+            if (status === 'JOINED' && !wasJoined) {
+                const current = participantCountOverrides[itemIdNum]
+                    ?? item.currentParticipants
+                    ?? (item as any).participants
+                    ?? 0;
+                setParticipantCountOverrides((prev) => ({ ...prev, [itemIdNum]: Number(current) + 1 }));
+            }
+            if (status === 'NONE' && wasJoined) {
+                const current = participantCountOverrides[itemIdNum]
+                    ?? item.currentParticipants
+                    ?? (item as any).participants
+                    ?? 0;
+                setParticipantCountOverrides((prev) => ({ ...prev, [itemIdNum]: Math.max(0, Number(current) - 1) }));
+            }
+        } catch {
+            setStatusOverrides((prev) => ({ ...prev, [itemIdNum]: fallback }));
+            if (fallback === 'NONE' && wasJoined) {
+                const current = participantCountOverrides[itemIdNum]
+                    ?? item.currentParticipants
+                    ?? (item as any).participants
+                    ?? 0;
+                setParticipantCountOverrides((prev) => ({ ...prev, [itemIdNum]: Math.max(0, Number(current) - 1) }));
+            }
+        }
+    };
+
+    const handleJoinClick = async (item: EventDto) => {
+        try {
+            await Promise.resolve(onJoin(item));
+        } catch (err) {
+            console.error(err);
+        }
+        await syncStatusFromServer(item, 'JOINED');
+    };
+
+    const handleApplyClick = async (item: EventDto) => {
+        const wasRejected = itemStatus(item, Number(item.id)) === 'REJECTED';
+        try {
+            await Promise.resolve(onApply(item));
+        } catch (err) {
+            console.error(err);
+        }
+        await syncStatusFromServer(item, wasRejected ? 'RE_PENDING' : 'PENDING');
     };
 
     const renderEventActionBar = (item: EventDto, barClassName: string) => {
@@ -947,7 +1006,7 @@ export default function EventDetailsModal({
             (item as any).reputationClosesAt,
         );
         const isPastEvent = !!item.isPast || (item as any).status === 'past' || (item as any).is_past === true || windowState.started;
-        const currentStatus = String((item as any).user_status || item.userStatus || '').toUpperCase().trim();
+        const currentStatus = itemStatus(item, itemIdNum);
         const isJoined = currentStatus === 'JOINED';
         const isPending = currentStatus === 'PENDING';
         const isRePending = currentStatus === 'RE_PENDING';
@@ -977,8 +1036,8 @@ export default function EventDetailsModal({
                         variant="success"
                         label="Вы идёте"
                         buttonClassName="!h-11 !rounded-full"
-                        items={[{ label: 'Выйти из события', onClick: () => { void handleLeaveClick(itemIdNum); }, tone: 'danger' }]}
-                        desktop={<button type="button" onClick={() => { void handleLeaveClick(itemIdNum); }} className="w-full bg-white hover:bg-[#B85C5C] text-[#B85C5C] hover:text-white border border-[#B85C5C]/35 font-bold h-11 text-xs rounded-full flex items-center justify-center gap-1.5 transition duration-150"><X className="w-3.5 h-3.5" /><span>Выйти из события</span></button>}
+                        items={[{ label: 'Выйти из события', onClick: () => { void handleLeaveClick(item); }, tone: 'danger' }]}
+                        desktop={<button type="button" onClick={() => { void handleLeaveClick(item); }} className="w-full bg-white hover:bg-[#B85C5C] text-[#B85C5C] hover:text-white border border-[#B85C5C]/35 font-bold h-11 text-xs rounded-full flex items-center justify-center gap-1.5 transition duration-150"><X className="w-3.5 h-3.5" /><span>Выйти из события</span></button>}
                     />
                 ) : isPending ? (
                     <StatusMenuButton
@@ -986,8 +1045,8 @@ export default function EventDetailsModal({
                         variant="amber"
                         label="Заявка отправлена"
                         buttonClassName="!h-11 !rounded-full"
-                        items={[{ label: 'Отменить заявку', onClick: () => { void handleLeaveClick(itemIdNum); }, tone: 'danger' }]}
-                        desktop={<button type="button" onClick={() => { void handleLeaveClick(itemIdNum); }} className="w-full flex items-center justify-center gap-2.5 p-2.5 rounded-full bg-[#EDE6F5] hover:bg-[#F6E8E6] border border-[#5C4B7A]/20 hover:border-[#B85C5C]/30 text-xs text-[#5C4B7A] hover:text-[#B85C5C] transition-all duration-200 group/modalPending font-bold h-11"><Clock className="w-4 h-4 shrink-0 group-hover/modalPending:hidden animate-pulse" /><span className="group-hover/modalPending:hidden">Заявка отправлена</span><X className="w-4 h-4 hidden group-hover/modalPending:inline" /><span className="hidden group-hover/modalPending:inline">Отменить отправленную заявку</span></button>}
+                        items={[{ label: 'Отменить заявку', onClick: () => { void handleLeaveClick(item); }, tone: 'danger' }]}
+                        desktop={<button type="button" onClick={() => { void handleLeaveClick(item); }} className="w-full flex items-center justify-center gap-2.5 p-2.5 rounded-full bg-[#EDE6F5] hover:bg-[#F6E8E6] border border-[#5C4B7A]/20 hover:border-[#B85C5C]/30 text-xs text-[#5C4B7A] hover:text-[#B85C5C] transition-all duration-200 group/modalPending font-bold h-11"><Clock className="w-4 h-4 shrink-0 group-hover/modalPending:hidden animate-pulse" /><span className="group-hover/modalPending:hidden">Заявка отправлена</span><X className="w-4 h-4 hidden group-hover/modalPending:inline" /><span className="hidden group-hover/modalPending:inline">Отменить отправленную заявку</span></button>}
                     />
                 ) : isRePending ? (
                     <StatusMenuButton
@@ -995,10 +1054,10 @@ export default function EventDetailsModal({
                         variant="amber"
                         label="Повторная заявка отправлена"
                         buttonClassName="!h-11 !rounded-full"
-                        items={[{ label: 'Отменить повторную заявку', onClick: () => { void handleLeaveClick(itemIdNum); }, tone: 'danger' }]}
+                        items={[{ label: 'Отменить повторную заявку', onClick: () => { void handleLeaveClick(item); }, tone: 'danger' }]}
                         desktop={
                             <button
-                                onClick={() => { void handleLeaveClick(itemIdNum); }}
+                                onClick={() => { void handleLeaveClick(item); }}
                                 className="w-full flex items-center justify-center gap-2.5 p-2.5 rounded-full bg-[#EDE6F5] hover:bg-[#F6E8E6] border border-[#5C4B7A]/30 hover:border-[#B85C5C]/30 text-xs text-[#1C1824] hover:text-[#B85C5C] transition-all duration-200 group/modalRePending font-bold h-11 cursor-pointer"
                             >
                                 <Clock className="w-3.5 h-3.5 animate-pulse group-hover/modalRePending:hidden" />
@@ -1021,15 +1080,15 @@ export default function EventDetailsModal({
                 ) : isRejected ? (
                     <button
                         type="button"
-                        onClick={() => onApply && onApply(item)}
+                        onClick={() => onApply && void handleApplyClick(item)}
                         className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
                     >
                         <Plus className="w-4 h-4" />
                         <span>Подать заявку повторно</span>
                     </button>) : isPrivateComputed ? (
-                    <button onClick={() => onApply(item)} className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-98"><Send className="w-4 h-4" /> <span>Оставить заявку</span></button>
+                    <button onClick={() => void handleApplyClick(item)} className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-98"><Send className="w-4 h-4" /> <span>Оставить заявку</span></button>
                 ) : (
-                    <button onClick={() => onJoin(item)} className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-98"><ThumbsUp className="w-4 h-4" /> <span>Вступить в событие</span></button>
+                    <button onClick={() => void handleJoinClick(item)} className="w-full bg-[#5C4B7A] hover:bg-[#4A3C66] text-white text-xs font-bold h-11 rounded-full transition flex items-center justify-center gap-1.5 active:scale-98"><ThumbsUp className="w-4 h-4" /> <span>Вступить в событие</span></button>
                 )}
             </div>
         );
@@ -1169,7 +1228,7 @@ export default function EventDetailsModal({
                             );
                             const isPastEvent = !!item.isPast || (item as any).status === 'past' || (item as any).is_past === true || windowState.started;
                             const canVoteReputation = item.canVoteReputation === true || windowState.open;
-                            const currentStatus = String((item as any).user_status || item.userStatus || '').toUpperCase().trim();
+                            const currentStatus = itemStatus(item, itemIdNum);
                             const isJoined = currentStatus === 'JOINED';
                             const isPending = currentStatus === 'PENDING';
                             const isRePending = currentStatus === 'RE_PENDING';
@@ -1177,7 +1236,7 @@ export default function EventDetailsModal({
                             const isBanned = currentStatus === 'BANNED';
                             const isKicked = currentStatus === 'KICKED';
                             const isPrivateComputed = !!item.isPrivate || (item as any).privacy === 'approval';
-                            const isHidden = isEventPhotosHidden(item, user?.id);
+                            const isHidden = isEventPhotosHidden({ ...item, user_status: currentStatus, userStatus: currentStatus }, user?.id);
                             const currentDescription = item.description || (item as any).description;
 
                             const rawEventDate = eventMoment(item);
@@ -1299,13 +1358,6 @@ export default function EventDetailsModal({
                                     {item.tags && item.tags.length > 0 && !isHidden && (
                                         <div className="flex flex-wrap gap-1.5 pt-1">
                                             {item.tags.map((t) => ( <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-white border border-[#1A1916]/10 text-[#6B645C]">#{t.replace('#', '')}</span> ))}
-                                        </div>
-                                    )}
-
-                                    {isJoined && !isOwner && !isPastEvent && (
-                                        <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-[#E6F7EF] text-sm">
-                                            <CheckCircle2 className="w-4 h-4 text-[#4A8B6F] shrink-0" />
-                                            <div><div className="font-bold text-[#146B48]">Вы идёте на встречу</div></div>
                                         </div>
                                     )}
 

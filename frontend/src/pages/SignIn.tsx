@@ -61,7 +61,6 @@ export default function SignIn({ setPage, onOpenLegal }: SignInProps) {
             <Container className="max-w-sm w-full">
                 <div className="text-center mb-6">
                     <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Вход в сеть</h1>
-                    <p className="text-slate-500 text-sm mt-1.5">Рады видеть вас снова, сосед!</p>
                 </div>
 
                 <Card className="shadow-xl">

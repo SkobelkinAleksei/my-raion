@@ -220,7 +220,7 @@ export default function NeighborProfile({ targetUserId, navigate }: NeighborProf
 
     const loadPhotoPreview = async () => {
         try {
-            const data = await fetchPhotos(targetUserId, { page: 0, size: 4 });
+            const data = await fetchPhotos(targetUserId, { page: 0, size: 16 });
             setPhotoPreview({
                 total: Number(data.total) || 0,
                 urls: (data.items || []).map((item) => resolvePhotoUrl(item.url)),

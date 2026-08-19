@@ -317,7 +317,15 @@ export default function Events({ initialTab = 'upcoming', mode = 'owner', target
   }, [tab, mineFilter]);
 
   const handleJoin = async (ev: EventFull) => {
-    try { await api.post(`/api/v1/social/events/${ev.id}/participants/join`); showToast('Вы присоединились к событию соседа!'); loadUserEvents(); setTimeout(async () => { await refreshEventRooms(); }, 500); } catch (error) { console.error(error); }
+    try {
+      await api.post(`/api/v1/social/events/${ev.id}/participants/join`);
+      showToast('Вы присоединились к событию соседа!');
+      setDetailsEvent((prev) => prev && String(prev.id) === String(ev.id)
+        ? { ...prev, user_status: 'joined', userStatus: 'JOINED', participants: (prev.participants || 0) + 1 }
+        : prev);
+      loadUserEvents();
+      setTimeout(async () => { await refreshEventRooms(); }, 500);
+    } catch (error) { console.error(error); }
   };
   const handleApply = async (ev: EventFull) => {
     try {
@@ -330,12 +338,24 @@ export default function Events({ initialTab = 'upcoming', mode = 'owner', target
           ? `Повторная заявка на «${title}» отправлена организатору`
           : `Заявка на приватную встречу «${title}» отправлена организатору`
       );
+      setDetailsEvent((prev) => prev && String(prev.id) === String(ev.id)
+        ? { ...prev, user_status: isRepeat ? 'RE_PENDING' : 'PENDING', userStatus: isRepeat ? 'RE_PENDING' : 'PENDING' }
+        : prev);
       loadUserEvents();
       if (tab === 'applications' && isOwner) loadApplicationsData();
     } catch (error) { console.error(error); }
   };
   const handleLeave = async (eventId: string) => {
-    try { await api.post(`/api/v1/social/events/${eventId}/participants/leave`); showToast('Вы успешно отказались от участия в событии'); loadUserEvents(); if (tab === 'applications' && isOwner) loadApplicationsData(); if (refreshEventRooms) { setTimeout(async () => { await refreshEventRooms(); }, 350); } } catch (error) { console.error(error); }
+    try {
+      await api.post(`/api/v1/social/events/${eventId}/participants/leave`);
+      showToast('Вы успешно отказались от участия в событии');
+      setDetailsEvent((prev) => prev && String(prev.id) === String(eventId)
+        ? { ...prev, user_status: 'none', userStatus: 'NONE', participants: Math.max(0, (prev.participants || 1) - 1) }
+        : prev);
+      loadUserEvents();
+      if (tab === 'applications' && isOwner) loadApplicationsData();
+      if (refreshEventRooms) { setTimeout(async () => { await refreshEventRooms(); }, 350); }
+    } catch (error) { console.error(error); }
   };
   const handleCancelEvent = async (ev: EventFull) => {
     const confirmed = await showAppConfirm({

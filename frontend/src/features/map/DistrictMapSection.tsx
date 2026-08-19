@@ -416,45 +416,37 @@ const DistrictMapSection = forwardRef<any, DistrictMapSectionProps>((
             if (action === 'APPLY') endpoint = `/api/v1/social/events/${event.id}/participants/apply`;
 
             const response = await api.post(endpoint);
-            if (response.data) {
-                const statusResponse = await api.get(`/api/v1/social/events/${event.id}/participants/status`).catch(() => ({ data: { status: '' } }));
+            const statusResponse = await api.get(`/api/v1/social/events/${event.id}/participants/status`).catch(() => ({ data: { status: '' } }));
 
-                const serverStatusStr = statusResponse.data?.status;
-                const realStatus = serverStatusStr || (action === 'JOIN' ? 'JOINED' : action === 'APPLY' ? 'PENDING' : 'NOT_PARTICIPATING');
+            const serverStatusStr = statusResponse.data?.status;
+            const realStatus = serverStatusStr || (action === 'JOIN' ? 'JOINED' : action === 'APPLY' ? 'PENDING' : 'NOT_PARTICIPATING');
 
-                const finalEvent: EventDto = {
-                    ...event,
-                    ...response.data,
-                    userStatus: realStatus.toUpperCase()
-                };
+            const finalEvent: EventDto = {
+                ...event,
+                ...(response.data || {}),
+                userStatus: realStatus.toUpperCase()
+            };
 
-                const finalEventsList = events.map(e => String(e.id) === String(event.id) ? finalEvent : e);
-                setEvents(finalEventsList);
-                if (action === 'LEAVE') {
-                    setSelectedEvent(null);
-                    window.setTimeout(() => mapRef.current?.invalidateSize(), 80);
-                } else {
-                    setSelectedEvent(finalEvent as any);
-                }
+            const finalEventsList = events.map(e => String(e.id) === String(event.id) ? finalEvent : e);
+            setEvents(finalEventsList);
+            setSelectedEvent(finalEvent as any);
 
-                if (action === 'APPLY') {
-                    const wasRejected = String(event.userStatus || '').toUpperCase() === 'REJECTED';
-                    const title = event.title || 'встречу';
-                    showAppInfoToast(
-                        wasRejected ? 'Повторная заявка' : 'Заявка отправлена',
-                        wasRejected
-                            ? `Повторная заявка на «${title}» отправлена организатору`
-                            : `Заявка на приватную встречу «${title}» отправлена организатору`
-                    );
-                }
-
-                if (onEventsChange) {
-                    onEventsChange(finalEventsList);
-                }
-
-                // Извещаем глобальный слой уведомлений, что данные изменились
-                window.dispatchEvent(new CustomEvent('refreshApplicationsData'));
+            if (action === 'APPLY') {
+                const wasRejected = String(event.userStatus || '').toUpperCase() === 'REJECTED';
+                const title = event.title || 'встречу';
+                showAppInfoToast(
+                    wasRejected ? 'Повторная заявка' : 'Заявка отправлена',
+                    wasRejected
+                        ? `Повторная заявка на «${title}» отправлена организатору`
+                        : `Заявка на приватную встречу «${title}» отправлена организатору`
+                );
             }
+
+            if (onEventsChange) {
+                onEventsChange(finalEventsList);
+            }
+
+            window.dispatchEvent(new CustomEvent('refreshApplicationsData'));
         } catch (error) {
             console.error(`Ошибка при действии ${action} с участниками:`, error);
         }
