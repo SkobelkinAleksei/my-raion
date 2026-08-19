@@ -49,7 +49,7 @@ import ChatFileBubble from '@/features/chat/ChatFileBubble';
 import { voiceQueueFromMessages } from '@/features/chat/chatVoicePlayer';
 import { useChatMediaAttach } from '@/features/chat/useChatMediaAttach';
 import { useChatPasteImages } from '@/features/chat/useChatPasteImages';
-import { ChatPendingStrip, ChatPaperclipButton, COMPOSER_BTN_MUTED, COMPOSER_BTN_SEND, COMPOSER_ICON } from '@/features/chat/ChatComposerExtras';
+import { ChatPendingStrip, ChatPaperclipButton, COMPOSER_BTN_MUTED, COMPOSER_BTN_SEND, COMPOSER_ICON, keepComposerFocus } from '@/features/chat/ChatComposerExtras';
 import ChatVoiceMiniBar from '@/features/chat/ChatVoiceMiniBar';
 import { ChatMicButton, ChatVoiceRecordingBar, useChatVoiceRecorder } from '@/features/chat/useChatVoiceRecorder';
 import { publishForwardToChats } from '@/shared/utils/shareToChat';
@@ -2184,6 +2184,8 @@ export default function GroupChatSection({
                         {actions.draft.trim() || chatMedia.count > 0 || actions.forwardBuffer.length > 0 || actions.editingId ? (
                             <button
                                 type="button"
+                                onMouseDown={keepComposerFocus}
+                                onPointerDown={keepComposerFocus}
                                 onClick={send}
                                 disabled={actions.editingId ? false : ((!actions.draft.trim() && chatMedia.count === 0 && actions.forwardBuffer.length === 0) || (chatMedia.count > 0 && !chatMedia.allReady))}
                                 className={COMPOSER_BTN_SEND}

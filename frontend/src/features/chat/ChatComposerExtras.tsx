@@ -11,6 +11,11 @@ export const COMPOSER_BTN_MUTED = `${COMPOSER_BTN} text-slate-500 hover:bg-slate
 export const COMPOSER_BTN_SEND = `${COMPOSER_BTN} bg-[#5C4B7A] text-white hover:bg-[#4A3C66]`;
 export const COMPOSER_ICON = 'w-5 h-5';
 
+/** Не отдаём фокус кнопке «Отправить», иначе на телефоне закрывается клавиатура. */
+export function keepComposerFocus(e: { preventDefault: () => void }) {
+  e.preventDefault();
+}
+
 export function ChatPendingStrip({ media }: { media: Media }) {
   if (media.count === 0) return null;
   return (

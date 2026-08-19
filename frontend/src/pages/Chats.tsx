@@ -180,21 +180,26 @@ export default function Chats({ pageActive = true }: { pageActive?: boolean }) {
 
   const tryOpenFromNotification = async () => {
     if (!pageActiveRef.current) return;
-    let personalId = localStorage.getItem('activePersonalId') || localStorage.getItem('openDirectChatWith');
-    let groupId = localStorage.getItem('activeGroupId');
+    const notifyPersonal = localStorage.getItem('activePersonalId') || localStorage.getItem('openDirectChatWith');
+    const notifyGroup = localStorage.getItem('activeGroupId');
+    let personalId = notifyPersonal;
+    let groupId = notifyGroup;
     if (!personalId && !groupId) {
       const saved = readPersistedOpenChat();
       if (saved?.kind === 'personal') personalId = saved.id;
       if (saved?.kind === 'group') groupId = saved.id;
     }
     if (!personalId && !groupId) return;
+    const reloadIfAlreadyOpen = Boolean(notifyPersonal || notifyGroup);
 
     if (personalId) {
       if (active && !activeRoom && Number(active.id) === Number(personalId)) {
         localStorage.removeItem('activePersonalId');
         localStorage.removeItem('openDirectChatWith');
         persistOpenChat('personal', personalId);
-        window.dispatchEvent(new CustomEvent(NAV_EVENT_RELOAD_CHAT_HISTORY, { detail: { personalId } }));
+        if (reloadIfAlreadyOpen) {
+          window.dispatchEvent(new CustomEvent(NAV_EVENT_RELOAD_CHAT_HISTORY, { detail: { personalId } }));
+        }
         return;
       }
       const match = (list: Chat[] | undefined) => (list || []).find((c) => c && Number(c.id) === Number(personalId));
@@ -226,7 +231,9 @@ export default function Chats({ pageActive = true }: { pageActive?: boolean }) {
     if (activeRoom && matchRoom([activeRoom])) {
       localStorage.removeItem('activeGroupId');
       persistOpenChat('group', activeRoom.id);
-      window.dispatchEvent(new CustomEvent(NAV_EVENT_RELOAD_CHAT_HISTORY, { detail: { groupId: activeRoom.id } }));
+      if (reloadIfAlreadyOpen) {
+        window.dispatchEvent(new CustomEvent(NAV_EVENT_RELOAD_CHAT_HISTORY, { detail: { groupId: activeRoom.id } }));
+      }
       return;
     }
 
