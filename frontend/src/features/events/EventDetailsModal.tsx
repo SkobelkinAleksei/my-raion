@@ -35,6 +35,7 @@ import ForwardModal from '@/features/chat/ForwardModal';
 import SavePhotoModal from '@/features/photos/SavePhotoModal';
 import { useChat } from '@/features/chat/ChatContext';
 import { ReportIconButton, useReport, type ReportTarget } from '@/features/report/ReportModal';
+import PinchZoomImage from '@/shared/ui/PinchZoomImage';
 
 interface EventDetailsModalProps {
     event: EventDto | EventDto[] | null;
@@ -160,6 +161,7 @@ function EventPhotoCarousel({ urls, className = 'h-44', report }: { urls: string
     const pointerStartY = useRef<number | null>(null);
     const dragging = useRef(false);
     const swipeAxis = useRef<'x' | 'y' | null>(null);
+    const activePointers = useRef(new Set<number>());
     const [dragX, setDragX] = useState(0);
     const [dragY, setDragY] = useState(0);
     const { stompClient } = useChat();
@@ -229,6 +231,13 @@ function EventPhotoCarousel({ urls, className = 'h-44', report }: { urls: string
     };
 
     const beginSwipe = (e: React.PointerEvent) => {
+        activePointers.current.add(e.pointerId);
+        if (activePointers.current.size >= 2) {
+            resetSwipe();
+            ignoreClick.current = true;
+            try { e.currentTarget.releasePointerCapture?.(e.pointerId); } catch { /* ignore */ }
+            return;
+        }
         if (forwardOpen || saveOpen) return;
         if ((e.target as HTMLElement).closest('button')) return;
         pointerStartX.current = e.clientX;
@@ -240,6 +249,7 @@ function EventPhotoCarousel({ urls, className = 'h-44', report }: { urls: string
     };
 
     const moveSwipe = (e: React.PointerEvent) => {
+        if (activePointers.current.size >= 2) return;
         if (!dragging.current || pointerStartX.current == null || pointerStartY.current == null) return;
         const dx = e.clientX - pointerStartX.current;
         const dy = e.clientY - pointerStartY.current;
@@ -252,6 +262,7 @@ function EventPhotoCarousel({ urls, className = 'h-44', report }: { urls: string
     };
 
     const endSwipe = (e: React.PointerEvent) => {
+        activePointers.current.delete(e.pointerId);
         if (!dragging.current) return;
         const dx = pointerStartX.current == null ? 0 : e.clientX - pointerStartX.current;
         const dy = pointerStartY.current == null ? 0 : e.clientY - pointerStartY.current;
@@ -465,7 +476,10 @@ function EventPhotoCarousel({ urls, className = 'h-44', report }: { urls: string
                         onPointerDown={beginSwipe}
                         onPointerMove={moveSwipe}
                         onPointerUp={endSwipe}
-                        onPointerCancel={resetSwipe}
+                        onPointerCancel={(e) => {
+                            activePointers.current.delete(e.pointerId);
+                            resetSwipe();
+                        }}
                         style={{
                             transform: `translateY(${dragY}px)`,
                             opacity: dragY ? Math.max(0.35, 1 - Math.abs(dragY) / 380) : 1,
@@ -482,12 +496,10 @@ function EventPhotoCarousel({ urls, className = 'h-44', report }: { urls: string
                         >
                             {urls.map((url, i) => (
                                 <div key={`${url}-lb-${i}`} className="min-w-full h-full shrink-0 flex items-center justify-center px-4 lg:px-14">
-                                    <img
+                                    <PinchZoomImage
                                         src={url}
                                         alt=""
                                         className="max-w-[92vw] max-h-[86vh] object-contain rounded-2xl shadow-2xl select-none"
-                                        draggable={false}
-                                        onClick={(e) => e.stopPropagation()}
                                     />
                                 </div>
                             ))}

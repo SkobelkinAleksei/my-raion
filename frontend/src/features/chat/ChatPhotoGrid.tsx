@@ -14,6 +14,7 @@ import { getAvatarUrl, openNeighborProfile, isCompactViewport, COMPACT_VIEWPORT_
 import { useAppBackHandler } from '@/shared/hooks/useAppBackHandler';
 import { useNotification } from '@/shared/context/NotificationContext';
 import { ReportIconButton, useReport, type ReportTarget } from '@/features/report/ReportModal';
+import PinchZoomImage from '@/shared/ui/PinchZoomImage';
 import {
   countPhotoComments,
   createPhotoComment,
@@ -89,6 +90,7 @@ function ChatMediaLightbox({
   const pointerStartY = useRef<number | null>(null);
   const dragging = useRef(false);
   const swipeAxis = useRef<'x' | 'y' | null>(null);
+  const activePointers = useRef(new Set<number>());
   const [dragX, setDragX] = useState(0);
   const [dragY, setDragY] = useState(0);
   const ignoreClick = useRef(false);
@@ -351,6 +353,18 @@ function ChatMediaLightbox({
   })();
 
   const beginSwipe = (e: React.PointerEvent) => {
+    activePointers.current.add(e.pointerId);
+    if (activePointers.current.size >= 2) {
+      dragging.current = false;
+      swipeAxis.current = null;
+      pointerStartX.current = null;
+      pointerStartY.current = null;
+      setDragX(0);
+      setDragY(0);
+      ignoreClick.current = true;
+      try { e.currentTarget.releasePointerCapture?.(e.pointerId); } catch { /* ignore */ }
+      return;
+    }
     if (commentsOpen || forwardOpen || saveOpen) return;
     if ((e.target as HTMLElement).closest('button')) return;
     pointerStartX.current = e.clientX;
@@ -362,6 +376,7 @@ function ChatMediaLightbox({
   };
 
   const moveSwipe = (e: React.PointerEvent) => {
+    if (activePointers.current.size >= 2) return;
     if (!dragging.current || pointerStartX.current == null || pointerStartY.current == null) return;
     const dx = e.clientX - pointerStartX.current;
     const dy = e.clientY - pointerStartY.current;
@@ -376,6 +391,7 @@ function ChatMediaLightbox({
   };
 
   const endSwipe = (e: React.PointerEvent) => {
+    activePointers.current.delete(e.pointerId);
     if (!dragging.current) return;
     dragging.current = false;
     const dx = pointerStartX.current == null ? 0 : e.clientX - pointerStartX.current;
@@ -521,7 +537,8 @@ function ChatMediaLightbox({
         onPointerDown={beginSwipe}
         onPointerMove={moveSwipe}
         onPointerUp={endSwipe}
-        onPointerCancel={() => {
+        onPointerCancel={(e) => {
+          activePointers.current.delete(e.pointerId);
           dragging.current = false;
           swipeAxis.current = null;
           pointerStartX.current = null;
@@ -544,12 +561,10 @@ function ChatMediaLightbox({
         >
           {urls.map((url, i) => (
             <div key={`${url}-${i}`} className="min-w-full h-full flex items-center justify-center px-4 sm:px-14">
-              <img
+              <PinchZoomImage
                 src={url}
                 alt=""
                 className="max-w-full max-h-full object-contain rounded-2xl shadow-2xl select-none"
-                draggable={false}
-                onClick={(e) => e.stopPropagation()}
               />
             </div>
           ))}
