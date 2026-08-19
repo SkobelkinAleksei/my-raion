@@ -20,7 +20,7 @@ import PersonalChatSection from '@/features/chat/PersonalChatSection';
 import CreatePersonalGroupModal from '@/features/chat/CreatePersonalGroupModal';
 import ChatListSwipeRow from '@/features/chat/ChatListSwipeRow';
 import ChatVoiceMiniBar from '@/features/chat/ChatVoiceMiniBar';
-import { getAvatarUrl, persistOpenChat, clearPersistedOpenChat, readPersistedOpenChat, scheduleClearPersistedOpenChatIfVisible, cancelScheduledClearPersistedOpenChat, persistChatsSidebarTab, readPersistedChatsSidebarTab, NAV_EVENT_OPEN_CHAT, readHistoryState, isCompactViewport } from '@/shared/utils/navigation';
+import { getAvatarUrl, persistOpenChat, clearPersistedOpenChat, readPersistedOpenChat, scheduleClearPersistedOpenChatIfVisible, cancelScheduledClearPersistedOpenChat, persistChatsSidebarTab, readPersistedChatsSidebarTab, NAV_EVENT_OPEN_CHAT, NAV_EVENT_RELOAD_CHAT_HISTORY, readHistoryState, isCompactViewport } from '@/shared/utils/navigation';
 import { useAppBackHandler } from '@/shared/hooks/useAppBackHandler';
 import { readChatDraft, subscribeChatDrafts } from '@/features/chat/chatDrafts';
 import { showAppInfoToast } from '@/shared/utils/appToast';
@@ -194,6 +194,7 @@ export default function Chats({ pageActive = true }: { pageActive?: boolean }) {
         localStorage.removeItem('activePersonalId');
         localStorage.removeItem('openDirectChatWith');
         persistOpenChat('personal', personalId);
+        window.dispatchEvent(new CustomEvent(NAV_EVENT_RELOAD_CHAT_HISTORY, { detail: { personalId } }));
         return;
       }
       const match = (list: Chat[] | undefined) => (list || []).find((c) => c && Number(c.id) === Number(personalId));
@@ -225,6 +226,7 @@ export default function Chats({ pageActive = true }: { pageActive?: boolean }) {
     if (activeRoom && matchRoom([activeRoom])) {
       localStorage.removeItem('activeGroupId');
       persistOpenChat('group', activeRoom.id);
+      window.dispatchEvent(new CustomEvent(NAV_EVENT_RELOAD_CHAT_HISTORY, { detail: { groupId: activeRoom.id } }));
       return;
     }
 

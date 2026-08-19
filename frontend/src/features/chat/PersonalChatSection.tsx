@@ -3,7 +3,7 @@ import api, { uploadChatVoice } from '@/shared/lib/api';
 import { theme } from '@/shared/ui/theme';
 import { useChat, formatSidebarMessage, mediaHintFromMessage, mapBundledForwardQuotes, isForwardQuoteCaption } from '@/features/chat/ChatContext';
 import { useAuth } from '@/shared/context/AuthContext';
-import { openNeighborProfile, getAvatarUrl } from '@/shared/utils/navigation';
+import { openNeighborProfile, getAvatarUrl, NAV_EVENT_RELOAD_CHAT_HISTORY } from '@/shared/utils/navigation';
 import { presenceLabel } from '@/shared/utils/presence';
 
 import {
@@ -41,6 +41,7 @@ import ChatPinnedBar from '@/features/chat/ChatPinnedBar';
 import ChatMessageText from '@/features/chat/ChatMessageText';
 import ChatComposerInput from '@/features/chat/ChatComposerInput';
 import ChatUnreadDivider, { insertUnreadDivider, isUnreadMarker } from '@/features/chat/ChatUnreadDivider';
+import { mergeChatMessagesById } from '@/features/chat/mergeChatMessages';
 import { ChatScrollDownButton, oldestNumericId, realMessageCount } from '@/features/chat/chatScroll';
 import { showAppInfoToast } from '@/shared/utils/appToast';
 import { useReport } from '@/features/report/ReportModal';
@@ -93,6 +94,8 @@ export default function PersonalChatSection({
     const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
     const historyLoadingRef = useRef(false);
     const historyHasMoreRef = useRef(true);
+    const historyFetchGenRef = useRef(0);
+    const [historyEpoch, setHistoryEpoch] = useState(0);
     const messagesRef = useRef<Msg[]>([]);
     const HISTORY_PAGE_SIZE = 30;
     const skipDraftSave = useRef(true);
@@ -215,6 +218,7 @@ export default function PersonalChatSection({
         };
 
         const fetchHistory = async () => {
+            const gen = ++historyFetchGenRef.current;
             try {
                 historyLoadingRef.current = false;
                 setHistoryLoadingMore(false);
@@ -228,7 +232,7 @@ export default function PersonalChatSection({
                 setHistoryHasMore(rawMessages.length >= HISTORY_PAGE_SIZE);
                 const filtered = rawMessages.filter((m: any) => m.content !== '[CHAT_CREATED]');
                 let acc = filtered.map(mapRaw).sort((a: any, b: any) => Number(a.id) - Number(b.id));
-                const unreadAtOpen = unreadAtOpenRef.current;
+                const unreadAtOpen = historyEpoch === 0 ? unreadAtOpenRef.current : 0;
                 let hasMore = rawMessages.length >= HISTORY_PAGE_SIZE;
                 for (let page = 0; page < 8 && hasMore && unreadAtOpen > realMessageCount(acc); page++) {
                     const beforeId = oldestNumericId(acc);
@@ -246,11 +250,14 @@ export default function PersonalChatSection({
                     }
                     acc = [...older, ...acc].sort((a: any, b: any) => Number(a.id) - Number(b.id));
                 }
+                if (gen !== historyFetchGenRef.current) return;
                 historyHasMoreRef.current = hasMore;
                 setHistoryHasMore(hasMore);
-                const formatted = insertUnreadDivider(acc, unreadAtOpen);
 
-                actions.setMessages(formatted.length > 0 ? formatted : acc);
+                actions.setMessages((prev) => {
+                    const merged = mergeChatMessagesById(acc, prev);
+                    return insertUnreadDivider(merged, unreadAtOpen);
+                });
 
                 if (pageActiveRef.current && document.visibilityState === 'visible') {
                 api.put(`/api/v1/social/chats/read/${activePersonal.id}`)
@@ -278,7 +285,6 @@ export default function PersonalChatSection({
                 actions.scrollOpenThread();
             } catch (err) {
                 console.error("Ошибка загрузки истории личного чата:", err);
-                actions.setMessages([]);
             }
         };
         fetchHistory();
@@ -287,6 +293,17 @@ export default function PersonalChatSection({
             window.clearTimeout(typingIdleRef.current);
             typingIdleRef.current = null;
         }
+    }, [activePersonal.id, historyEpoch]);
+
+    useEffect(() => {
+        const onReload = (event: Event) => {
+            const personalId = (event as CustomEvent<{ personalId?: number | string }>).detail?.personalId;
+            if (personalId != null && Number(personalId) === Number(activePersonal.id)) {
+                setHistoryEpoch((n) => n + 1);
+            }
+        };
+        window.addEventListener(NAV_EVENT_RELOAD_CHAT_HISTORY, onReload);
+        return () => window.removeEventListener(NAV_EVENT_RELOAD_CHAT_HISTORY, onReload);
     }, [activePersonal.id]);
 
     useEffect(() => {

@@ -2,6 +2,7 @@ import { resolveChatPhotoUrl } from '@/features/chat/chatPhotos';
 
 export const NAV_EVENT_CHANGE_PAGE = 'changePage';
 export const NAV_EVENT_OPEN_CHAT = 'openChatFromNotification';
+export const NAV_EVENT_RELOAD_CHAT_HISTORY = 'reloadChatHistory';
 export const NAV_KEY_NEIGHBOR_ID = 'openNeighborProfileId';
 export const NAV_PAGE_NEIGHBOR_FRIENDS = 'neighbor-friends';
 

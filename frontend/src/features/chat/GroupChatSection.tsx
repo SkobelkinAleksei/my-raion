@@ -5,7 +5,7 @@ import SegmentedRingLoader, { ParticipantsLoadRetry } from '@/shared/ui/Segmente
 import { theme } from '@/shared/ui/theme';
 import { useChat, formatSidebarMessage, mediaHintFromMessage, resolveMessageMedia, mapBundledForwardQuotes, isForwardQuoteCaption, isPersonalGroupRoom } from '@/features/chat/ChatContext';
 import { useAuth } from '@/shared/context/AuthContext';
-import { openNeighborProfile, getAvatarUrl } from '@/shared/utils/navigation';
+import { openNeighborProfile, getAvatarUrl, NAV_EVENT_RELOAD_CHAT_HISTORY } from '@/shared/utils/navigation';
 import { showAppInfoToast, showAppConfirm } from '@/shared/utils/appToast';
 import {
     MoreHorizontal,
@@ -59,6 +59,7 @@ import ChatPinnedBar from '@/features/chat/ChatPinnedBar';
 import ChatMessageText from '@/features/chat/ChatMessageText';
 import ChatComposerInput from '@/features/chat/ChatComposerInput';
 import ChatUnreadDivider, { insertUnreadDivider, isUnreadMarker } from '@/features/chat/ChatUnreadDivider';
+import { mergeChatMessagesById } from '@/features/chat/mergeChatMessages';
 import { ChatScrollDownButton, oldestNumericId, realMessageCount } from '@/features/chat/chatScroll';
 import { mentionQuery, insertMention } from '@/features/chat/chatMentions';
 import ChatPollCard from '@/features/chat/ChatPollCard';
@@ -271,6 +272,8 @@ export default function GroupChatSection({
     const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
     const historyLoadingRef = useRef(false);
     const historyHasMoreRef = useRef(true);
+    const historyFetchGenRef = useRef(0);
+    const [historyEpoch, setHistoryEpoch] = useState(0);
     const messagesRef = useRef<Msg[]>([]);
     messagesRef.current = actions.messages;
     historyHasMoreRef.current = historyHasMore;
@@ -593,12 +596,13 @@ export default function GroupChatSection({
         };
 
         const fetchHistory = async () => {
+            const gen = ++historyFetchGenRef.current;
             try {
                 historyLoadingRef.current = false;
                 setHistoryLoadingMore(false);
                 historyHasMoreRef.current = true;
                 setHistoryHasMore(true);
-                const unreadAtOpen = unreadAtOpenRef.current;
+                const unreadAtOpen = historyEpoch === 0 ? unreadAtOpenRef.current : 0;
                 const response = await api.get(`/api/v1/social/chats/room/${activeRoom.id}/history`, {
                     params: { size: HISTORY_PAGE_SIZE },
                 });
@@ -620,11 +624,14 @@ export default function GroupChatSection({
                     }
                     acc = [...older, ...acc].sort((a: any, b: any) => Number(a.id) - Number(b.id));
                 }
+                if (gen !== historyFetchGenRef.current) return;
                 historyHasMoreRef.current = hasMore;
                 setHistoryHasMore(hasMore);
-                const formatted = insertUnreadDivider(acc, unreadAtOpen);
 
-                actions.setMessages(formatted.length > 0 ? formatted : acc);
+                actions.setMessages((prev) => {
+                    const merged = mergeChatMessagesById(acc, prev);
+                    return insertUnreadDivider(merged, unreadAtOpen);
+                });
 
                 if (pageActiveRef.current && document.visibilityState === 'visible') {
                 api.post(`/api/v1/social/chats/room/${activeRoom.id}/read`)
@@ -641,6 +648,17 @@ export default function GroupChatSection({
             } catch (err) { console.error("Ошибка загрузки истории группы:", err); }
         };
         fetchHistory();
+    }, [activeRoom.id, historyEpoch]);
+
+    useEffect(() => {
+        const onReload = (event: Event) => {
+            const groupId = (event as CustomEvent<{ groupId?: number | string }>).detail?.groupId;
+            if (groupId != null && Number(groupId) === Number(activeRoom.id)) {
+                setHistoryEpoch((n) => n + 1);
+            }
+        };
+        window.addEventListener(NAV_EVENT_RELOAD_CHAT_HISTORY, onReload);
+        return () => window.removeEventListener(NAV_EVENT_RELOAD_CHAT_HISTORY, onReload);
     }, [activeRoom.id]);
 
     useEffect(() => {
